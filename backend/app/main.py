@@ -35,8 +35,15 @@ app.include_router(health_router)
 
 @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
-    request_payload = request.model_dump(mode="json")
-    fingerprint = create_fingerprint(request_payload)
+    fingerprint = create_fingerprint(
+    {
+        "place_id": request.place_id,
+        "reviews": [
+            review.model_dump(mode="json")
+            for review in request.reviews
+        ],
+    }
+)
 
     # Check cache first.
     cached = cache.get(request.place_id, fingerprint)
