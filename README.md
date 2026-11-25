@@ -56,29 +56,6 @@ Uses Gemini Structured Output to extract structured business insights.
 
 透過 Gemini Structured Output，將評論轉換成結構化的商家分析結果。
 
-- **Pros** — Positive aspects of a business.
-- **Cons** — Negative aspects of a business.
-- **Aspect Scores** — Scores for individual business aspects.
-- **Evidence Mapping** — Links each insight to its original review.
-
-- **Pros** — 商家的優點。
-- **Cons** — 商家的缺點。
-- **Aspect Scores** — 各項商家面向的評分。
-- **Evidence Mapping** — 將分析結果對應回原始評論，提升可追溯性。
-
-**Analysis Pipeline**
-- Filters out empty review texts before analysis.
-- Uses Gemini Structured Output with a Pydantic JSON Schema.
-- Validates evidence IDs against the original review dataset.
-- Removes insights without valid supporting evidence.
-- Enforces a 30-second request timeout and configurable input limits.
-
-**分析流程**
-- 分析前排除空白評論。
-- 使用 Pydantic JSON Schema 約束 Gemini 結構化輸出。
-- 驗證 Evidence IDs 是否存在於原始評論資料。
-- 移除缺乏有效證據支持的分析結果。
-- 設定 30 秒請求逾時及可配置的輸入限制。
 
 ### 4. Gemini / Mock Mode | AI 分析模式
 
@@ -111,28 +88,8 @@ flowchart TD
     K --> L[Review Insights]
 ```
 
-### Data Flow | 資料流程
 
-1. The Chrome Extension extracts reviews from Google Maps.
-2. Extracted reviews are sent to the FastAPI backend.
-3. The backend checks the SQLite cache using a content fingerprint.
-4. The Cleaner identifies suspicious reviews.
-5. The Timeline service analyzes monthly review trends.
-6. Gemini performs aspect-based sentiment analysis on eligible reviews.
-7. The backend validates evidence review IDs against the original reviews.
-8. The Extension displays the analysis results in the Chrome Side Panel.
 
--
-1. Chrome Extension 從 Google Maps 擷取評論。
-2. 將評論資料傳送至 FastAPI Backend。
-3. Backend 使用內容指紋檢查 SQLite Cache。
-4. Cleaner 辨識可疑評論。
-5. Timeline 分析每月評論趨勢。
-6. Gemini 對符合條件的評論進行面向情感分析。
-7. Backend 驗證 Evidence Review IDs 是否對應原始評論。
-8. Extension 在 Chrome Side Panel 顯示分析結果。
-
----
 
 ## Tech Stack | 技術架構
 
@@ -180,7 +137,6 @@ Review-Denoiser/
 └── README.md
 ```
 
----
 
 ## Getting Started | 安裝與啟動
 
@@ -252,137 +208,8 @@ Load the Extension in Chrome:
 
 Open Google Maps, navigate to a business, select its Reviews section, and open the Review Denoiser Side Panel.
 
----
 
-## API Reference | API 說明
 
-### POST `/api/v1/analyze`
-
-Analyzes a collection of Google Maps reviews.
-
-分析一組 Google Maps 商家評論。
-
-**Request Example**
-
-```json
-{
-  "place_id": "0x123456:0xabcdef",
-  "scraped_at": "2026-11-25T12:00:00Z",
-  "reviews": [
-    {
-      "review_id": "review-001",
-      "rating": 5,
-      "text": "Great food and excellent service!",
-      "relative_time": "1 week ago",
-      "author_reviews_count": 12,
-      "review_date": "2026-11-18T12:00:00Z"
-    },
-    {
-      "review_id": "review-002",
-      "rating": 2,
-      "text": "The food was too salty.",
-      "relative_time": "2 weeks ago",
-      "author_reviews_count": 35,
-      "review_date": "2026-11-11T12:00:00Z"
-    }
-  ]
-}
-```
-
-**Response Structure**
-
-```json
-{
-  "cache_hit": false,
-  "analysis_mode": "gemini",
-  "analyzed_count": 2,
-  "metrics": {
-    "total_reviews": 2,
-    "suspicious_count": 0,
-    "clean_count": 2,
-    "historical_negative_ratio": 0.25
-  },
-  "anomaly_alert": false,
-  "timeline": [
-    {
-      "month": "2026-11",
-      "review_count": 2,
-      "negative_count": 1,
-      "negative_ratio": 0.5
-    }
-  ],
-  "aspect_scores": {
-    "Food": 3.5
-  },
-  "pros": [
-    {
-      "aspect": "Service",
-      "sentiment": "positive",
-      "summary": "Customers appreciate the service.",
-      "evidence_review_ids": ["review-001"]
-    }
-  ],
-  "cons": [
-    {
-      "aspect": "Food",
-      "sentiment": "negative",
-      "summary": "Some customers find the food too salty.",
-      "evidence_review_ids": ["review-002"]
-    }
-  ],
-  "suspicious_reasons_breakdown": {}
-}
-```
-
-*The response above is an illustrative example. Actual results depend on the submitted reviews and AI analysis.*
-
-### Input Constraints | 輸入限制
-
-| Field | Limit |
-|---|---|
-| `place_id` | 1–256 characters |
-| Reviews per request | Maximum 120 |
-| Review text | Maximum 5,000 characters |
-| Gemini reviews per request | Maximum 50 |
-| Gemini total review text | Maximum 20,000 characters |
-| Gemini request timeout | 30 seconds |
-
-All timestamps must include timezone information and are normalized to UTC.
-
-所有時間欄位都必須包含時區資訊，Backend 會統一轉換為 UTC。
-
-Gemini input exceeding its limits returns HTTP 422 instead of silently truncating reviews.
-
-超過 Gemini 分析限制時會回傳 HTTP 422，不會直接截斷評論內容。
-
----
-
-## Error Handling | 錯誤處理
-
-The backend provides structured error responses for AI-related failures.
-
-Backend 針對 AI 分析錯誤提供結構化回應。
-
-| HTTP Status | Error Code | Description |
-|---|---|---|
-| 422 | `LLM_INPUT_LIMIT` | AI input exceeds configured limits |
-| 503 | `LLM_NOT_CONFIGURED` | Gemini API Key is missing |
-| 503 | `LLM_SERVICE_UNAVAILABLE` | Gemini service unavailable |
-| 504 | `LLM_TIMEOUT` | AI request timed out |
-| 502 | `LLM_INVALID_RESPONSE` | Invalid or empty AI response |
-
-Example:
-
-```json
-{
-  "detail": {
-    "code": "LLM_TIMEOUT",
-    "message": "AI 分析逾時，請稍後再試。"
-  }
-}
-```
-
----
 
 ## Testing | 測試方式
 
@@ -406,7 +233,7 @@ npm run typecheck
 npm run build
 ```
 
----
+
 
 ## Current Limitations | 目前限制
 
@@ -422,7 +249,6 @@ npm run build
 - 除非啟用 Mock Mode，否則 Gemini 分析需要有效的 API Key。
 - AI 分析結果不一定能代表所有消費者的體驗，應搭配原始評論證據判讀。
 
----
 
 ## Future Improvements | 未來改善方向
 
@@ -438,7 +264,7 @@ npm run build
 - 增加可配置的 Backend 部署設定。
 - 擴充自動化測試與整合測試。
 
----
+
 
 ## License
 
