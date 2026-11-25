@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Google Maps Review De-noiser",
+  "version": "0.1.0",
+  "description": "Summarize recent Google Maps reviews.",
+  "permissions": ["activeTab", "sidePanel", "storage"],
+  "host_permissions": ["https://www.google.com/maps/*", "https://maps.google.com/*"],
+  "action": {
+    "default_title": "Review De-noiser"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  }
+}
