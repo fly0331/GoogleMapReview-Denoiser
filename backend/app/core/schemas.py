@@ -1,5 +1,14 @@
-from datetime import datetime
-from pydantic import BaseModel, Field
+
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, Field, field_validator
+
+
+def normalize_aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("Datetime must include a timezone")
+
+    return value.astimezone(timezone.utc)
 
 
 class ReviewInput(BaseModel):
@@ -10,11 +19,26 @@ class ReviewInput(BaseModel):
     author_reviews_count: int | None = Field(default=None, ge=0)
     review_date: datetime | None = None
 
+    @field_validator("review_date")
+    @classmethod
+    def validate_review_date(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        return normalize_aware_datetime(value)
+
 
 class AnalyzeRequest(BaseModel):
     place_id: str = Field(min_length=1)
     reviews: list[ReviewInput]
     scraped_at: datetime
+
+    @field_validator("scraped_at")
+    @classmethod
+    def validate_scraped_at(cls, value: datetime) -> datetime:
+        return normalize_aware_datetime(value)
 
 
 class ReviewAnalysis(BaseModel):
@@ -40,7 +64,7 @@ class TimelineBucket(BaseModel):
 class AnalyzeResponse(BaseModel):
     cache_hit: bool
     analyzed_count: int
-    metrics: dict[str, int | float]
+    metrics: dict[str, int | float | None]
     anomaly_alert: bool
     timeline: list[TimelineBucket]
     aspect_scores: dict[str, float]

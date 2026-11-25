@@ -63,7 +63,7 @@ class SQLiteCache:
             return None
 
         cached_at = row[1]
-        if time.time() - cached_at > self.ttl_seconds:
+        if time.time() - cached_at >= self.ttl_seconds:
             self.delete(place_id)
             return None
 

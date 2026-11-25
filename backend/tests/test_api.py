@@ -1,3 +1,8 @@
+from unittest.mock import Mock
+
+import app.main as main
+from app.core.schemas import LLMABSAOutput
+
 def payload():
     return {"place_id": "p1", "scraped_at": "2026-11-25T00:00:00Z", "reviews": [{"review_id": "r1", "rating": 5, "text": "服務很好", "relative_time": "1 week ago"}, {"review_id": "r2", "rating": 5, "text": "五星送小菜", "relative_time": "1 week ago"}]}
 
@@ -45,4 +50,70 @@ def test_same_request_still_uses_cache(client):
 
     assert first_response.cache_hit is False
     assert second_response.cache_hit is True
+    
+    
+
+def test_analyzed_count_excludes_empty_review_text(monkeypatch):
+    cache = Mock()
+    cache.get.return_value = None
+    monkeypatch.setattr(main, "cache", cache)
+
+    # Keep the LLM isolated from external providers.
+    monkeypatch.setattr(
+        main,
+        "analyze_reviews",
+        lambda reviews: LLMABSAOutput(),
+    )
+
+    test_payload = payload()
+    test_payload["reviews"].append(
+        {
+            "review_id": "r3",
+            "rating": 4,
+            "text": "   ",
+            "relative_time": "1 week ago",
+        }
+    )
+
+    request = AnalyzeRequest.model_validate(test_payload)
+    response = main.analyze(request)
+
+    # r1 is eligible, r2 is suspicious, and r3 has empty text.
+    assert response.analyzed_count == 1
+
+    # Empty-text reviews are still counted as clean reviews.
+    assert response.metrics["clean_count"] == 2
+
+
+def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
+    cache = Mock()
+
+    # Simulate a cache entry that is a dict but does not
+    # satisfy the AnalyzeResponse schema.
+    cache.get.return_value = {}
+
+    monkeypatch.setattr(main, "cache", cache)
+
+    # Isolate the test from external LLM providers.
+    monkeypatch.setattr(
+        main,
+        "analyze_reviews",
+        lambda reviews: LLMABSAOutput(),
+    )
+
+    request = AnalyzeRequest.model_validate(payload())
+
+    response = main.analyze(request)
+
+    # Invalid cache should be deleted.
+    cache.delete.assert_called_once_with(request.place_id)
+
+    # The request should be recomputed instead of raising
+    # a Pydantic ValidationError.
+    assert response.cache_hit is False
+    assert response.analyzed_count == 1
+
+    # The newly computed response should be saved.
+    cache.set.assert_called_once()
+
 

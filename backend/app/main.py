@@ -3,6 +3,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from app.api.health import router as health_router
 from app.cache import SQLiteCache, create_fingerprint
@@ -37,29 +38,65 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     request_payload = request.model_dump(mode="json")
     fingerprint = create_fingerprint(request_payload)
 
+    # Check cache first.
     cached = cache.get(request.place_id, fingerprint)
+
     if cached is not None:
-        cached["cache_hit"] = True
-        return AnalyzeResponse(**cached)
+        try:
+            return AnalyzeResponse.model_validate(
+                {
+                    **cached,
+                    "cache_hit": True,
+                }
+            )
+        except ValidationError:
+            # Invalid cached response: remove it and continue analysis.
+            cache.delete(request.place_id)
 
+    # Clean reviews.
     cleaned = clean_reviews(request.reviews, request.scraped_at)
-    eligible = [item.review for item in cleaned if not item.suspicious]
 
-    timeline, anomaly = build_timeline(cleaned, request.scraped_at)
+    # Reviews that pass the cleaner.
+    clean_count = sum(
+        not item.suspicious
+        for item in cleaned
+    )
+
+    # Only non-suspicious reviews with non-empty text
+    # are eligible for LLM analysis.
+    eligible = [
+        item.review
+        for item in cleaned
+        if not item.suspicious and item.review.text.strip()
+    ]
+
+    # Build monthly timeline and detect anomalies.
+    timeline, anomaly, historical_negative_ratio = build_timeline(
+        cleaned,
+        request.scraped_at,
+    )
+
+    # Run LLM analysis.
     llm_output = analyze_reviews(eligible)
 
+    # Count suspicious reasons.
     breakdown: dict[str, int] = {}
+
     for item in cleaned:
         for reason in item.reasons:
             breakdown[reason] = breakdown.get(reason, 0) + 1
 
+    # Build response.
     response = AnalyzeResponse(
         cache_hit=False,
         analyzed_count=len(eligible),
         metrics={
             "total_reviews": len(request.reviews),
-            "suspicious_count": sum(item.suspicious for item in cleaned),
-            "clean_count": len(eligible),
+            "suspicious_count": sum(
+                item.suspicious for item in cleaned
+            ),
+            "clean_count": clean_count,
+            "historical_negative_ratio": historical_negative_ratio,
         },
         anomaly_alert=anomaly,
         timeline=timeline,
@@ -69,6 +106,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         suspicious_reasons_breakdown=breakdown,
     )
 
+    # Save response to cache.
     cache.set(
         request.place_id,
         fingerprint,
