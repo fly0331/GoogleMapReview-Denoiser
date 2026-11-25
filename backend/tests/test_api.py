@@ -2,6 +2,8 @@ from unittest.mock import Mock
 
 import app.main as main
 from app.core.schemas import LLMABSAOutput
+import pytest
+from pydantic import ValidationError
 
 
 def payload():
@@ -223,3 +225,25 @@ def test_llm_error_returns_standard_error_response(monkeypatch):
             "message": "AI 分析逾時，請稍後再試。",
         }
     }
+    
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("place_id", "p" * 257),
+        ("reviews", [{}] * 121),
+    ],
+)
+def test_analyze_request_rejects_oversized_fields(field, value):
+    test_payload = payload()
+    test_payload[field] = value
+
+    with pytest.raises(ValidationError):
+        AnalyzeRequest.model_validate(test_payload)
+
+
+def test_review_text_rejects_more_than_5000_characters():
+    test_payload = payload()
+    test_payload["reviews"][0]["text"] = "a" * 5001
+
+    with pytest.raises(ValidationError):
+        AnalyzeRequest.model_validate(test_payload)

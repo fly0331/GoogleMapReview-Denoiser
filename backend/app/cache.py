@@ -33,11 +33,23 @@ class SQLiteCache:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+        connection = sqlite3.connect(
+            self.path,
+            timeout=5.0,
+        )
+        connection.execute("PRAGMA busy_timeout = 5000")
+        return connection
 
+    def _delete_expired(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "DELETE FROM cache WHERE cached_at <= ?",
+            (time.time() - self.ttl_seconds,),
+        )
+    
     def _initialize(self) -> None:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as connection, connection:
+            connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS cache (
@@ -47,6 +59,7 @@ class SQLiteCache:
                 )
                 """
             )
+            self._delete_expired(connection)
 
     def get(
         self,
@@ -104,6 +117,7 @@ class SQLiteCache:
         }
 
         with closing(self._connect()) as connection, connection:
+            self._delete_expired(connection)
             connection.execute(
                 """
                 INSERT OR REPLACE INTO cache(place_id, value, cached_at)

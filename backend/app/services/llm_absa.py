@@ -1,10 +1,15 @@
 import json
 import os
 
+
 from google import genai
+from google.genai import types
 from pydantic import ValidationError
 
 from app.core.schemas import LLMABSAOutput, ReviewInput
+
+MAX_GEMINI_REVIEWS = 50
+MAX_GEMINI_INPUT_CHARS = 20_000
 
 
 class LLMAnalysisError(Exception):
@@ -54,6 +59,23 @@ class LLMInvalidResponseError(LLMAnalysisError):
             message="AI 分析結果格式異常，請稍後再試。",
             status_code=502,
         )
+
+
+class LLMInputLimitError(LLMAnalysisError):
+    def __init__(self):
+        super().__init__(
+            code="LLM_INPUT_LIMIT",
+            message="評論資料超出 AI 單次分析限制，請減少評論數量或文字長度。",
+            status_code=422,
+        )
+
+
+def validate_gemini_input(reviews: list[ReviewInput]) -> None:
+    total_chars = sum(len(review.text) for review in reviews)
+
+    if len(reviews) > MAX_GEMINI_REVIEWS or total_chars > MAX_GEMINI_INPUT_CHARS:
+        raise LLMInputLimitError()
+
 
 def validate_evidence_ids(
     output: LLMABSAOutput,
@@ -132,12 +154,18 @@ def _analyze_with_mock(
 def _analyze_with_gemini(
     reviews: list[ReviewInput],
 ) -> LLMABSAOutput:
+    validate_gemini_input(reviews)
+
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise LLMNotConfiguredError()
 
     model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-    client = genai.Client(api_key=api_key)
+
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=30_000),
+    )
 
     review_data = [
         {
@@ -178,8 +206,8 @@ def _analyze_with_gemini(
             },
         )
 
-        if not interaction.output_text:
-            raise RuntimeError("Gemini returned an empty response")
+        if not interaction.output_text or not interaction.output_text.strip():
+            raise LLMInvalidResponseError()
 
         output = LLMABSAOutput.model_validate_json(interaction.output_text)
 
@@ -196,12 +224,9 @@ def _analyze_with_gemini(
 
     return validate_evidence_ids(output, reviews)
 
+
 def get_analysis_mode() -> str:
-    return (
-        "mock"
-        if os.getenv("MOCK_LLM", "false").lower() == "true"
-        else "gemini"
-    )
+    return "mock" if os.getenv("MOCK_LLM", "false").lower() == "true" else "gemini"
 
 
 def analyze_reviews(

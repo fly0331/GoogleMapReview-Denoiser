@@ -14,7 +14,7 @@ def normalize_aware_datetime(value: datetime) -> datetime:
 class ReviewInput(BaseModel):
     review_id: str
     rating: int = Field(ge=1, le=5)
-    text: str = ""
+    text: str = Field(default="", max_length=5000)
     relative_time: str | None = None
     author_reviews_count: int | None = Field(default=None, ge=0)
     review_date: datetime | None = None
@@ -31,8 +31,8 @@ class ReviewInput(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    place_id: str = Field(min_length=1)
-    reviews: list[ReviewInput]
+    place_id: str = Field(min_length=1, max_length=256)
+    reviews: list[ReviewInput] = Field(max_length=120)
     scraped_at: datetime
 
     @field_validator("scraped_at")

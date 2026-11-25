@@ -85,3 +85,47 @@ def test_cache_overwrites_previous_fingerprint(cache_path):
 
     assert cache.get("p1", "fingerprint-a") is None
     assert cache.get("p1", "fingerprint-b") == {"analyzed_count": 5}
+
+def test_cache_uses_wal_mode(cache_path):
+    cache = SQLiteCache(cache_path)
+
+    with cache._connect() as connection:
+        mode = connection.execute(
+            "PRAGMA journal_mode"
+        ).fetchone()[0]
+
+    assert mode.lower() == "wal"
+
+
+def test_cache_uses_busy_timeout(cache_path):
+    cache = SQLiteCache(cache_path)
+
+    with cache._connect() as connection:
+        timeout = connection.execute(
+            "PRAGMA busy_timeout"
+        ).fetchone()[0]
+
+    assert timeout == 5000
+
+
+def test_cache_cleans_expired_entries_on_initialization(cache_path):
+    cache = SQLiteCache(cache_path, ttl_seconds=60)
+
+    with cache._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO cache(place_id, value, cached_at)
+            VALUES (?, ?, ?)
+            """,
+            ("expired", "{}", time.time() - 120),
+        )
+
+    SQLiteCache(cache_path, ttl_seconds=60)
+
+    with cache._connect() as connection:
+        row = connection.execute(
+            "SELECT place_id FROM cache WHERE place_id = ?",
+            ("expired",),
+        ).fetchone()
+
+    assert row is None

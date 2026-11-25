@@ -140,7 +140,7 @@ def test_gemini_provider_parses_structured_output(
             return FakeInteraction()
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, http_options=None):
             assert api_key == "test-key"
             self.interactions = FakeInteractions()
 
@@ -173,7 +173,7 @@ def test_invalid_gemini_output_raises_error(
             return FakeInteraction()
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, http_options=None):
             self.interactions = FakeInteractions()
 
     monkeypatch.setattr(
@@ -341,7 +341,7 @@ def test_gemini_timeout_raises_timeout_error(
             raise TimeoutError("request timed out")
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, http_options=None):
             self.interactions = FakeInteractions()
 
     monkeypatch.setattr(
@@ -368,7 +368,7 @@ def test_gemini_service_error_raises_unavailable_error(
             raise RuntimeError("provider unavailable")
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, http_options=None):
             self.interactions = FakeInteractions()
 
     monkeypatch.setattr(
@@ -383,3 +383,74 @@ def test_gemini_service_error_raises_unavailable_error(
         llm_absa.analyze_reviews(reviews)
 
     assert exc_info.value.code == "LLM_SERVICE_UNAVAILABLE"
+    
+@pytest.mark.parametrize(
+    "reviews",
+    [
+        [
+            ReviewInput(
+                review_id=f"review-{i}",
+                rating=5,
+                text="評論",
+            )
+            for i in range(51)
+        ],
+        [
+            ReviewInput(
+                review_id=f"review-{i}",
+                rating=5,
+                text="a" * 4001,
+            )
+            for i in range(5)
+        ],
+    ],
+)
+def test_gemini_input_limits_are_enforced(reviews):
+    with pytest.raises(llm_absa.LLMInputLimitError):
+        llm_absa.validate_gemini_input(reviews)
+
+
+def test_gemini_input_at_limits_is_accepted():
+    reviews = [
+        ReviewInput(
+            review_id=f"review-{i}",
+            rating=5,
+            text="a" * 400,
+        )
+        for i in range(50)
+    ]
+
+    llm_absa.validate_gemini_input(reviews)
+
+
+@pytest.mark.parametrize("output_text", ["", "   "])
+def test_empty_gemini_response_raises_invalid_response(
+    reviews,
+    monkeypatch,
+    output_text,
+):
+    monkeypatch.setenv("MOCK_LLM", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    class FakeInteraction:
+        def __init__(self):
+            self.output_text = output_text
+
+    class FakeInteractions:
+        def create(self, **kwargs):
+            return FakeInteraction()
+
+    class FakeClient:
+        def __init__(self, api_key, http_options=None):
+            self.interactions = FakeInteractions()
+
+    monkeypatch.setattr(
+        llm_absa.genai,
+        "Client",
+        FakeClient,
+    )
+
+    with pytest.raises(llm_absa.LLMInvalidResponseError) as exc_info:
+        llm_absa.analyze_reviews(reviews)
+
+    assert exc_info.value.code == "LLM_INVALID_RESPONSE"
