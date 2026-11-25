@@ -1,4 +1,4 @@
-
+from typing import Literal
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
@@ -43,15 +43,54 @@ class AnalyzeRequest(BaseModel):
 
 class ReviewAnalysis(BaseModel):
     aspect: str
-    sentiment: str
+    sentiment: Literal["positive", "negative"]
     summary: str
     evidence_review_ids: list[str]
+
+    @field_validator("aspect", "summary")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Field must not be empty")
+        return value
+
+    @field_validator("evidence_review_ids")
+    @classmethod
+    def normalize_evidence_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(
+            rid.strip() for rid in value if rid.strip()
+        ))
 
 
 class LLMABSAOutput(BaseModel):
     pros: list[ReviewAnalysis] = Field(default_factory=list)
     cons: list[ReviewAnalysis] = Field(default_factory=list)
     aspect_scores: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("aspect_scores")
+    @classmethod
+    def validate_aspect_scores(
+        cls,
+        value: dict[str, float],
+    ) -> dict[str, float]:
+        normalized = {}
+
+        for aspect, score in value.items():
+            aspect = aspect.strip()
+
+            if not aspect:
+                raise ValueError("Aspect name must not be empty")
+
+            if aspect in normalized:
+                raise ValueError(f"Duplicate aspect: {aspect}")
+
+            if not 1.0 <= score <= 5.0:
+                raise ValueError("Aspect scores must be between 1 and 5")
+
+            normalized[aspect] = score
+
+        return normalized
 
 
 class TimelineBucket(BaseModel):

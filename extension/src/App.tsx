@@ -31,10 +31,89 @@ function formatMetricValue(value: number | null): string {
   return value.toFixed(2);
 }
 
+function formatReviewDate(
+  reviewDate: string | null,
+  relativeTime: string | null
+): string | null {
+  if (relativeTime) return relativeTime;
+
+  if (reviewDate) {
+    const date = new Date(reviewDate);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString("zh-TW");
+    }
+  }
+
+  return null;
+}
+
+function EvidenceList({
+  evidenceIds,
+  reviews,
+}: {
+  evidenceIds: string[];
+  reviews: AnalyzeRequest["reviews"];
+}) {
+  const evidenceReviews = evidenceIds
+    .map((id) => reviews.find((review) => review.review_id === id))
+    .filter((review) => review !== undefined);
+
+  if (evidenceReviews.length === 0) {
+    return (
+      <p className="mt-2 text-xs text-slate-400">
+        找不到對應的原始評論。
+      </p>
+    );
+  }
+
+  return (
+    <details className="mt-3 rounded-lg bg-slate-50 p-3">
+      <summary className="cursor-pointer text-xs font-medium text-blue-700">
+        查看原始評論（{evidenceReviews.length}）
+      </summary>
+
+      <div className="mt-3 space-y-3">
+        {evidenceReviews.map((review) => {
+          const dateLabel = formatReviewDate(
+            review.review_date,
+            review.relative_time
+          );
+
+          return (
+            <div
+              className="border-t border-slate-200 pt-3 first:border-0 first:pt-0"
+              key={review.review_id}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-amber-600">
+                  {"★".repeat(review.rating)}
+                  {"☆".repeat(5 - review.rating)}
+                </span>
+
+                {dateLabel && (
+                  <span className="text-xs text-slate-400">
+                    {dateLabel}
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                {review.text || "此評論沒有文字內容。"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
 export default function App() {
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [reviews, setReviews] = useState<AnalyzeRequest["reviews"]>([]);
   const [reviewCount, setReviewCount] = useState(0);
   const [placeId, setPlaceId] = useState<string | null>(null);
 
@@ -44,7 +123,9 @@ export default function App() {
     setError(null);
     setResult(null);
     setReviewCount(0);
+    setReviews([]);
     setPlaceId(null);
+    
 
     try {
       setStatus("collecting");
@@ -71,7 +152,7 @@ export default function App() {
       if (collection.reviews.length === 0) {
         throw new Error("沒有找到可分析的評論。");
       }
-
+      setReviews(collection.reviews);
       setReviewCount(collection.reviews.length);
       setPlaceId(collection.place_id);
       setStatus("analyzing");
@@ -299,9 +380,10 @@ export default function App() {
                     <p className="mt-1 text-xs text-slate-400">
                       情感：{item.sentiment}
                     </p>
-                    <p className="mt-1 break-all text-xs text-slate-400">
-                      Evidence: {item.evidence_review_ids.join(", ") || "無"}
-                    </p>
+                    <EvidenceList
+                      evidenceIds={item.evidence_review_ids}
+                      reviews={reviews}
+                    />
                   </div>
                 ))}
               </div>
@@ -329,9 +411,10 @@ export default function App() {
                     <p className="mt-1 text-xs text-slate-400">
                       情感：{item.sentiment}
                     </p>
-                    <p className="mt-1 break-all text-xs text-slate-400">
-                      Evidence: {item.evidence_review_ids.join(", ") || "無"}
-                    </p>
+                    <EvidenceList
+                      evidenceIds={item.evidence_review_ids}
+                      reviews={reviews}
+                    />
                   </div>
                 ))}
               </div>

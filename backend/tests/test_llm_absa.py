@@ -1,4 +1,3 @@
-
 import json
 
 import pytest
@@ -109,7 +108,6 @@ def test_gemini_provider_parses_structured_output(
                 "summary": "餐點美味",
                 "evidence_review_ids": [
                     "review-1",
-                    "invalid-id",
                 ],
             }
         ],
@@ -136,9 +134,7 @@ def test_gemini_provider_parses_structured_output(
     class FakeInteractions:
         def create(self, **kwargs):
             assert kwargs["model"] == "gemini-3.5-flash-lite"
-            assert kwargs["response_format"]["mime_type"] == (
-                "application/json"
-            )
+            assert kwargs["response_format"]["mime_type"] == ("application/json")
             return FakeInteraction()
 
     class FakeClient:
@@ -189,3 +185,145 @@ def test_invalid_gemini_output_raises_error(
         match="Gemini returned invalid ABSA output",
     ):
         llm_absa.analyze_reviews(reviews)
+
+
+def test_invalid_evidence_items_are_removed(reviews):
+    output = LLMABSAOutput(
+        pros=[
+            {
+                "aspect": "food",
+                "sentiment": "positive",
+                "summary": "餐點很好吃",
+                "evidence_review_ids": ["invalid-id"],
+            },
+            {
+                "aspect": "environment",
+                "sentiment": "positive",
+                "summary": "環境舒適",
+                "evidence_review_ids": ["review-3"],
+            },
+            {
+                "aspect": "price",
+                "sentiment": "positive",
+                "summary": "價格合理",
+                "evidence_review_ids": [],
+            },
+        ]
+    )
+
+    result = llm_absa.validate_evidence_ids(output, reviews)
+
+    assert len(result.pros) == 1
+    assert result.pros[0].aspect == "environment"
+
+
+def test_duplicate_aspects_are_removed(reviews):
+    output = LLMABSAOutput(
+        pros=[
+            {
+                "aspect": "food",
+                "sentiment": "positive",
+                "summary": "餐點很好吃",
+                "evidence_review_ids": ["review-1"],
+            },
+            {
+                "aspect": "FOOD",
+                "sentiment": "positive",
+                "summary": "餐點品質不錯",
+                "evidence_review_ids": ["review-3"],
+            },
+        ]
+    )
+
+    result = llm_absa.validate_evidence_ids(output, reviews)
+
+    assert len(result.pros) == 1
+
+
+def test_inconsistent_sentiment_is_removed(reviews):
+    output = LLMABSAOutput(
+        pros=[
+            {
+                "aspect": "service",
+                "sentiment": "negative",
+                "summary": "服務不好",
+                "evidence_review_ids": ["review-2"],
+            }
+        ],
+        cons=[
+            {
+                "aspect": "food",
+                "sentiment": "positive",
+                "summary": "餐點很好吃",
+                "evidence_review_ids": ["review-1"],
+            }
+        ],
+    )
+
+    result = llm_absa.validate_evidence_ids(output, reviews)
+
+    assert result.pros == []
+    assert result.cons == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "aspect": "",
+            "sentiment": "positive",
+            "summary": "餐點很好吃",
+            "evidence_review_ids": ["review-1"],
+        },
+        {
+            "aspect": "food",
+            "sentiment": "positive",
+            "summary": "   ",
+            "evidence_review_ids": ["review-1"],
+        },
+        {
+            "aspect": "food",
+            "sentiment": "neutral",
+            "summary": "餐點普通",
+            "evidence_review_ids": ["review-1"],
+        },
+    ],
+)
+def test_invalid_review_analysis_is_rejected(payload):
+    with pytest.raises(ValidationError):
+        LLMABSAOutput(pros=[payload])
+
+
+@pytest.mark.parametrize("score", [0.9, 5.1, -1])
+def test_invalid_aspect_scores_are_rejected(score):
+    with pytest.raises(ValidationError):
+        LLMABSAOutput(aspect_scores={"food": score})
+
+
+def test_duplicate_aspect_scores_are_rejected():
+    with pytest.raises(ValidationError):
+        LLMABSAOutput(
+            aspect_scores={
+                "food": 4.5,
+                " food ": 3.5,
+            }
+        )
+
+
+def test_evidence_ids_are_normalized():
+    output = LLMABSAOutput(
+        pros=[
+            {
+                "aspect": "food",
+                "sentiment": "positive",
+                "summary": "餐點很好吃",
+                "evidence_review_ids": [
+                    "review-1",
+                    "review-1",
+                    " ",
+                ],
+            }
+        ]
+    )
+
+    assert output.pros[0].evidence_review_ids == ["review-1"]

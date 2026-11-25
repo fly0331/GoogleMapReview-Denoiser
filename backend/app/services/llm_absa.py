@@ -1,4 +1,3 @@
-
 import json
 import os
 
@@ -14,28 +13,40 @@ def validate_evidence_ids(
 ) -> LLMABSAOutput:
     valid = {review.review_id for review in reviews}
 
-    output.pros = [
-        item.model_copy(
-            update={
-                "evidence_review_ids": [
-                    rid for rid in item.evidence_review_ids if rid in valid
-                ]
-            }
-        )
-        for item in output.pros
-    ]
-    output.cons = [
-        item.model_copy(
-            update={
-                "evidence_review_ids": [
-                    rid for rid in item.evidence_review_ids if rid in valid
-                ]
-            }
-        )
-        for item in output.cons
-    ]
+    def filter_items(
+        items: list,
+        expected_sentiment: str,
+    ) -> list:
+        filtered = []
+        seen_aspects = set()
 
-    return output
+        for item in items:
+            if item.sentiment != expected_sentiment:
+                continue
+
+            evidence_ids = [rid for rid in item.evidence_review_ids if rid in valid]
+
+            if not evidence_ids:
+                continue
+
+            aspect_key = item.aspect.strip().casefold()
+            if aspect_key in seen_aspects:
+                continue
+
+            seen_aspects.add(aspect_key)
+
+            filtered.append(
+                item.model_copy(update={"evidence_review_ids": evidence_ids})
+            )
+
+        return filtered
+
+    return output.model_copy(
+        update={
+            "pros": filter_items(output.pros, "positive"),
+            "cons": filter_items(output.cons, "negative"),
+        }
+    )
 
 
 def _analyze_with_mock(
@@ -44,28 +55,28 @@ def _analyze_with_mock(
     pros = []
     cons = []
 
-    positive_ids = [
-        r.review_id for r in reviews if r.rating >= 4
-    ]
-    negative_ids = [
-        r.review_id for r in reviews if r.rating <= 3
-    ]
+    positive_ids = [r.review_id for r in reviews if r.rating >= 4]
+    negative_ids = [r.review_id for r in reviews if r.rating <= 3]
 
     if positive_ids:
-        pros.append({
-            "aspect": "overall",
-            "sentiment": "positive",
-            "summary": "顧客回饋正面",
-            "evidence_review_ids": positive_ids[:3],
-        })
+        pros.append(
+            {
+                "aspect": "overall",
+                "sentiment": "positive",
+                "summary": "顧客回饋正面",
+                "evidence_review_ids": positive_ids[:3],
+            }
+        )
 
     if negative_ids:
-        cons.append({
-            "aspect": "overall",
-            "sentiment": "negative",
-            "summary": "顧客提出改善意見",
-            "evidence_review_ids": negative_ids[:3],
-        })
+        cons.append(
+            {
+                "aspect": "overall",
+                "sentiment": "negative",
+                "summary": "顧客提出改善意見",
+                "evidence_review_ids": negative_ids[:3],
+            }
+        )
 
     return LLMABSAOutput(pros=pros, cons=cons)
 
@@ -75,9 +86,7 @@ def _analyze_with_gemini(
 ) -> LLMABSAOutput:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is required when MOCK_LLM is disabled"
-        )
+        raise RuntimeError("GEMINI_API_KEY is required when MOCK_LLM is disabled")
 
     model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
     client = genai.Client(api_key=api_key)
@@ -124,20 +133,14 @@ def _analyze_with_gemini(
         if not interaction.output_text:
             raise RuntimeError("Gemini returned an empty response")
 
-        output = LLMABSAOutput.model_validate_json(
-            interaction.output_text
-        )
+        output = LLMABSAOutput.model_validate_json(interaction.output_text)
 
     except ValidationError as exc:
-        raise RuntimeError(
-            "Gemini returned invalid ABSA output"
-        ) from exc
+        raise RuntimeError("Gemini returned invalid ABSA output") from exc
     except Exception as exc:
         if isinstance(exc, RuntimeError):
             raise
-        raise RuntimeError(
-            f"Gemini API request failed: {exc}"
-        ) from exc
+        raise RuntimeError(f"Gemini API request failed: {exc}") from exc
 
     return validate_evidence_ids(output, reviews)
 
@@ -145,10 +148,8 @@ def _analyze_with_gemini(
 def analyze_reviews(
     reviews: list[ReviewInput],
 ) -> LLMABSAOutput:
-    eligible = [
-        review for review in reviews if review.text.strip()
-    ]
-    
+    eligible = [review for review in reviews if review.text.strip()]
+
     if not eligible:
         return LLMABSAOutput()
 
