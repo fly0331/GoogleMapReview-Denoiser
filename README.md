@@ -4,7 +4,7 @@
 
 **一款 AI 的 Chrome 擴充叉件，分析 Google Maps 商家評論、過濾可疑評論、整理情感分析結果，並偵測潛在的負評趨勢。**
 
----
+
 
 ## Overview | 專案介紹
 
@@ -20,7 +20,7 @@ Google Maps 評論能反映消費者的真實體驗，但當評論數量龐大�
 2. **Review Timeline** — Visualizes review trends and identifies unusual increases in negative feedback.
 3. **AI-powered Aspect-Based Sentiment Analysis (ABSA)** — Extracts business strengths and weaknesses with evidence linked to original reviews.
 
----
+
 
 ## Features | 核心功能
 
@@ -67,7 +67,7 @@ Uses Gemini Structured Output to extract structured business insights.
 - **Mock Mode：** 使用預設模擬結果，方便本地開發與測試。
 - Extension UI 會顯示目前使用的分析模式。
 
----
+
 
 ## Architecture | 系統架構
 
@@ -106,7 +106,7 @@ flowchart TD
 | AI | Google Gemini API, google-genai |
 | Testing | pytest, httpx |
 
----
+
 
 ## Project Structure | 專案結構
 

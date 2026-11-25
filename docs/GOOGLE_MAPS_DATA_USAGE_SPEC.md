@@ -1,0 +1,209 @@
+# Google Maps Review Denoiser — Data Usage Specification
+
+- **Document status:** Draft for compliance review
+- **Repository:** `fly0331/GoogleMapReview-Denoiser`
+- **Branch reviewed:** `master`
+- **Review date:** 2026-11-26
+- **Product:** Chrome Extension + FastAPI backend + Gemini API
+- **Important:** This document describes observed implementation behavior. It is not a legal opinion and does not establish permission from Google or any other rights holder.
+
+## 1. Product purpose and user interaction
+
+Google Maps Review Denoiser is a Chrome Extension intended to help a general Google Maps user understand a business's customer reviews. The user opens a Google Maps place page and explicitly clicks **「分析目前商家」** in the extension. The extension then collects review information from the currently displayed Google Maps page, sends it to the configured FastAPI backend, and displays the resulting analysis.
+
+The intended product is free to use, with no advertisements, subscription fees, sale of review data, or direct monetization of review data.
+
+## 2. Data collection
+
+### 2.1 Source and trigger
+
+- Source: review cards rendered in the user's current Google Maps page.
+- Trigger: user clicks the extension's analysis action.
+- Collection behavior: the content script locates review cards, expands available review text, scrolls the review container, deduplicates by review ID, and collects up to 50 reviews.
+- The implementation does not establish that the reviews are sorted by newest. The extension should not claim newest-first collection.
+- Collection relies partly on Google Maps DOM selectors and may break if the page structure changes.
+
+### 2.2 Fields collected
+
+| Field | Description | Observed use |
+|---|---|---|
+| `place_id` | Place identifier parsed from the Google Maps page URL | Backend cache key and request context; displayed in extension |
+| `review_id` | Review identifier from the review card's `data-review-id` attribute | Deduplication, evidence linking, Gemini input |
+| `rating` | Star rating parsed from an accessibility label | Cleaner, Timeline, Gemini input |
+| `text` | Review text displayed in the review card after expansion | Cleaner, Gemini input, evidence display |
+| `relative_time` | Relative date text displayed in the review card | Backend date estimation for Timeline |
+| `author_reviews_count` | Review count shown for the review author, when parseable | Cleaner heuristic for suspicious reviews |
+| `review_date` | Absolute review date field | Currently always set to `null` by the content script |
+| `scraped_at` | UTC timestamp generated when collection completes | Backend date reference for relative-time conversion |
+
+The current implementation does not collect reviewer names, profile photos, email addresses, phone numbers, or precise user location as explicit review fields. This statement is limited to the inspected collection code and should be rechecked if the implementation changes.
+
+## 3. Data transmission
+
+### 3.1 Extension to backend
+
+The extension sends an `AnalyzeRequest` to the configured API endpoint. The request contains:
+
+- `place_id`
+- `scraped_at`
+- `reviews[]`, with `review_id`, `rating`, `text`, `relative_time`, `author_reviews_count`, and `review_date`
+
+The currently reviewed `master` version uses `http://127.0.0.1:8000` as its API base URL. This is a development configuration, not a production deployment endpoint. A production release must use a secured production endpoint and must not include the localhost host permission.
+
+The request is user-triggered. The inspected code does not show continuous/background collection or an analytics event pipeline.
+
+### 3.2 Backend processing
+
+The FastAPI backend:
+
+1. Validates the request, including a maximum of 120 reviews, a maximum review text length of 5,000 characters, and a maximum `place_id` length of 256 characters.
+2. Creates a SHA-256 fingerprint from the place ID and serialized review payload.
+3. Checks the SQLite cache.
+4. On a cache miss, applies the Cleaner rules and builds the Timeline.
+5. Sends eligible reviews to the configured LLM analysis implementation.
+6. Returns analysis results and stores the response in the SQLite cache.
+
+A cache hit returns the cached analysis response without repeating Cleaner, Timeline, or Gemini analysis.
+
+### 3.3 Backend to Gemini
+
+When `MOCK_LLM` is not enabled, the backend sends eligible, non-suspicious reviews with non-empty text to the Gemini API.
+
+The Gemini input contains only:
+
+- `review_id`
+- `rating`
+- `text`
+
+It does not include the `place_id`, `scraped_at`, `relative_time`, `author_reviews_count`, or `review_date` fields in the inspected implementation.
+
+The implementation limits a Gemini request to 50 eligible reviews and 20,000 total review-text characters. It does not intentionally truncate text to fit those limits. The configured model defaults to `gemini-3.5-flash-lite`, and the API key is read by the backend from `GEMINI_API_KEY`; it is not embedded in the extension code.
+
+The actual Gemini account tier, applicable service terms, retention settings, and data-use settings are operational/account facts and cannot be established from repository code. They must be verified before release.
+
+## 4. Analysis and derived data
+
+### 4.1 Cleaner
+
+The backend evaluates review text, rating, and author review count using heuristic rules. It generates suspicious-review flags, scores, and reason labels. These are derived outputs, not additional source fields.
+
+### 4.2 Timeline
+
+The backend estimates review dates from `relative_time` when `review_date` is unavailable. It groups accepted reviews by month and calculates review counts and negative-review ratios. The anomaly alert compares the recent 60-day negative ratio with the historical ratio, subject to the implemented sample-size and history conditions.
+
+### 4.3 Gemini ABSA
+
+Gemini produces structured positive and negative aspects, summaries, evidence review IDs, and aspect scores. The backend validates evidence IDs against the eligible review IDs and filters invalid or inconsistent results.
+
+## 5. Data returned to the extension
+
+The backend response includes:
+
+- `cache_hit` and `analysis_mode`
+- analyzed count and aggregate metrics
+- anomaly alert
+- monthly Timeline buckets
+- aspect scores
+- positive and negative aspect summaries
+- suspicious-reason counts
+- evidence review IDs associated with aspect summaries
+
+The extension retains the collected reviews in React application state and uses evidence review IDs to display the corresponding original review text, rating, and date information. The inspected code does not show the extension writing review content to `chrome.storage`.
+
+## 6. Storage and retention
+
+### 6.1 SQLite analysis cache
+
+The backend SQLite cache stores:
+
+- `place_id`
+- a JSON envelope containing cache format version, request fingerprint, and serialized analysis response
+- cache timestamp
+
+The cached response contains derived analysis results and evidence review IDs. The inspected response schema does not include the original review text.
+
+The application enforces a seven-day cache TTL and deletes expired entries during initialization, cache writes, and expired cache reads. This is an application-level expiry policy; it is not a guarantee that all filesystem, SQLite WAL/SHM, backup, snapshot, or infrastructure copies are immediately and irreversibly erased.
+
+The inspected cache implementation enables SQLite WAL mode and a five-second busy timeout. No explicit database encryption is shown in the inspected code.
+
+### 6.2 Browser memory and logs
+
+- The extension keeps review data in application memory to support analysis and evidence display.
+- The content script currently logs the full collected review objects to the browser console (`Collected reviews`). This should be removed before a public release.
+- No use of `chrome.storage` for review persistence was identified in the inspected files. Recheck the complete repository before making a definitive privacy-policy statement.
+- Server, hosting-provider, proxy, crash, and third-party service logs have not been audited in this repository review.
+
+## 7. Permissions and network scope
+
+The inspected Manifest V3 manifest declares `activeTab`, `sidePanel`, and `storage` permissions, and host permissions for Google Maps domains plus the local development API. The `storage` permission appears unused in the inspected code and should be reviewed. The localhost permission is development-only and must be removed or replaced for production.
+
+The extension communicates with the backend over HTTP in the current local-development configuration. A public release must use HTTPS and an appropriately secured backend.
+
+## 8. Monetization and sharing
+
+The intended product model is:
+
+- Free to use
+- No advertisements
+- No subscription fees
+- No sale or licensing of review data or analysis results
+- No direct revenue generated from review data
+
+The product sends eligible review content to a third-party AI provider (Gemini) for its core analysis function. This transfer must be clearly disclosed to users and assessed against applicable provider terms and platform policies. A free, ad-free model does not itself establish rights to collect, process, transmit, or create derived works from third-party content.
+
+## 9. User disclosure and consent requirements before release
+
+Before public distribution, provide a clear and accessible disclosure explaining, at minimum:
+
+1. What review fields are collected.
+2. That collection starts when the user initiates analysis.
+3. That review content is sent to the service backend.
+4. That eligible review text, rating, and review ID are sent to Gemini for analysis.
+5. What analysis results are cached, where, and for how long at the application level.
+6. Whether any operational logs or backups may retain information and their retention periods.
+7. How users can contact the operator and request support or data deletion, where applicable.
+8. The applicable privacy policy and terms.
+
+The disclosure must accurately reflect the deployed architecture, provider settings, and actual operational retention—not just the source-code behavior described here.
+
+## 10. Unresolved compliance and operational questions
+
+The following are not answered by the inspected code:
+
+- Whether Google authorizes this collection method and the creation/display of review-derived analysis for general users and arbitrary businesses.
+- Whether review identifiers and original review text may be transmitted to Gemini and displayed again as evidence.
+- Which Gemini API terms, data-use settings, and retention rules apply to the actual project account and selected service tier.
+- Whether backend hosting, database, logs, backups, and monitoring introduce additional processors or retention.
+- Whether the planned Chrome Web Store disclosures and Limited Use declarations fully describe all data collection and third-party transfers.
+- Whether the final production deployment has suitable access controls, rate limits, abuse prevention, deletion procedures, and incident response.
+
+## 11. Release gate
+
+**Do not publicly launch or submit the extension to the Chrome Web Store until:**
+
+- Google Maps content-use authorization has been clarified through reliable written guidance and/or legal review.
+- Gemini API terms and account data-use settings have been verified.
+- Production data flows, processors, logs, storage, backups, and retention have been documented.
+- Full-review console logging has been removed.
+- The privacy policy, in-product disclosure, and Chrome Web Store privacy declarations match the actual production behavior.
+- Production API transport and security controls are in place.
+
+---
+
+## Implementation references reviewed
+
+The following files on the `master` branch were inspected for this draft:
+
+- `extension/manifest.json`
+- `extension/src/App.tsx`
+- `extension/src/api.ts`
+- `extension/src/content.ts`
+- `extension/src/types.ts`
+- `backend/app/main.py`
+- `backend/app/core/schemas.py`
+- `backend/app/cache.py`
+- `backend/app/services/llm_absa.py`
+- `backend/app/services/cleaner.py`
+- `backend/app/services/timeline.py`
+
+This inventory should be updated whenever collection, transmission, storage, provider, or deployment behavior changes.

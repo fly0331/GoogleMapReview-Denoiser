@@ -1,10 +1,11 @@
-
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from app.rate_limit import InMemoryRateLimiter
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
+
 
 from app.api.health import router as health_router
 from app.cache import SQLiteCache, create_fingerprint
@@ -17,8 +18,39 @@ from app.services.llm_absa import (
 )
 from app.services.timeline import build_timeline
 
-
 app = FastAPI(title="Review Denoiser API", version="0.1.0")
+
+rate_limiter = InMemoryRateLimiter(
+    max_requests=int(os.getenv("RATE_LIMIT_REQUESTS", "10")),
+    window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
+)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    if (
+        request.method == "POST"
+        and request.url.path == "/api/v1/analyze"
+    ):
+        client_ip = (
+            request.client.host
+            if request.client
+            else "unknown"
+        )
+
+        if not rate_limiter.is_allowed(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many requests. Please try again later.",
+                    }
+                },
+            )
+
+    return await call_next(request)
+
 
 @app.exception_handler(LLMAnalysisError)
 async def llm_analysis_exception_handler(
@@ -35,9 +67,10 @@ async def llm_analysis_exception_handler(
         },
     )
 
+
 origins = [
     origin.strip()
-    for origin in os.getenv("CORS_ORIGINS", "*").split(",")
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
     if origin.strip()
 ]
 
@@ -55,15 +88,13 @@ app.include_router(health_router)
 
 @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+    
     fingerprint = create_fingerprint(
-    {
-        "place_id": request.place_id,
-        "reviews": [
-            review.model_dump(mode="json")
-            for review in request.reviews
-        ],
-    }
-)
+        {
+            "place_id": request.place_id,
+            "reviews": [review.model_dump(mode="json") for review in request.reviews],
+        }
+    )
 
     # Check cache first.
     cached = cache.get(request.place_id, fingerprint)
@@ -84,10 +115,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     cleaned = clean_reviews(request.reviews, request.scraped_at)
 
     # Reviews that pass the cleaner.
-    clean_count = sum(
-        not item.suspicious
-        for item in cleaned
-    )
+    clean_count = sum(not item.suspicious for item in cleaned)
 
     # Only non-suspicious reviews with non-empty text
     # are eligible for LLM analysis.
@@ -120,9 +148,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         analyzed_count=len(eligible),
         metrics={
             "total_reviews": len(request.reviews),
-            "suspicious_count": sum(
-                item.suspicious for item in cleaned
-            ),
+            "suspicious_count": sum(item.suspicious for item in cleaned),
             "clean_count": clean_count,
             "historical_negative_ratio": historical_negative_ratio,
         },
