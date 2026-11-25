@@ -9,7 +9,7 @@ from app.api.health import router as health_router
 from app.cache import SQLiteCache, create_fingerprint
 from app.core.schemas import AnalyzeRequest, AnalyzeResponse
 from app.services.cleaner import clean_reviews
-from app.services.llm_absa import analyze_reviews
+from app.services.llm_absa import analyze_reviews, get_analysis_mode
 from app.services.timeline import build_timeline
 
 
@@ -96,6 +96,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     # Build response.
     response = AnalyzeResponse(
         cache_hit=False,
+        analysis_mode=get_analysis_mode(),
         analyzed_count=len(eligible),
         metrics={
             "total_reviews": len(request.reviews),

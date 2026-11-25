@@ -3,22 +3,53 @@ from unittest.mock import Mock
 import app.main as main
 from app.core.schemas import LLMABSAOutput
 
+
 def payload():
-    return {"place_id": "p1", "scraped_at": "2026-11-25T00:00:00Z", "reviews": [{"review_id": "r1", "rating": 5, "text": "服務很好", "relative_time": "1 week ago"}, {"review_id": "r2", "rating": 5, "text": "五星送小菜", "relative_time": "1 week ago"}]}
+    return {
+        "place_id": "p1",
+        "scraped_at": "2026-11-25T00:00:00Z",
+        "reviews": [
+            {
+                "review_id": "r1",
+                "rating": 5,
+                "text": "服務很好",
+                "relative_time": "1 week ago",
+            },
+            {
+                "review_id": "r2",
+                "rating": 5,
+                "text": "五星送小菜",
+                "relative_time": "1 week ago",
+            },
+        ],
+    }
+
 
 from app.main import analyze
 from app.core.schemas import AnalyzeRequest
+
 
 def test_analyze_contract_and_cache(client):
     request = AnalyzeRequest.model_validate(payload())
     first = analyze(request)
     body = first.model_dump()
-    assert {"cache_hit", "analyzed_count", "metrics", "anomaly_alert", "timeline", "aspect_scores", "pros", "cons", "suspicious_reasons_breakdown"} <= body.keys()
+    assert {
+        "cache_hit",
+        "analysis_mode",
+        "analyzed_count",
+        "metrics",
+        "anomaly_alert",
+        "timeline",
+        "aspect_scores",
+        "pros",
+        "cons",
+        "suspicious_reasons_breakdown",
+    } <= body.keys()
     assert body["cache_hit"] is False
     assert body["analyzed_count"] == 1
     second = analyze(request)
     assert second.cache_hit is True
-    
+
 
 def test_changed_reviews_for_same_place_trigger_reanalysis(client):
     first_request = AnalyzeRequest.model_validate(payload())
@@ -50,8 +81,7 @@ def test_same_request_still_uses_cache(client):
 
     assert first_response.cache_hit is False
     assert second_response.cache_hit is True
-    
-    
+
 
 def test_analyzed_count_excludes_empty_review_text(monkeypatch):
     cache = Mock()
@@ -93,6 +123,7 @@ def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
     cache.get.return_value = {}
 
     monkeypatch.setattr(main, "cache", cache)
+    monkeypatch.setenv("MOCK_LLM", "true")
 
     # Isolate the test from external LLM providers.
     monkeypatch.setattr(
@@ -112,8 +143,57 @@ def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
     # a Pydantic ValidationError.
     assert response.cache_hit is False
     assert response.analyzed_count == 1
+    assert response.analysis_mode == "mock"
 
     # The newly computed response should be saved.
     cache.set.assert_called_once()
 
+def test_analysis_mode_mock(monkeypatch):
+    cache = Mock()
+    cache.get.return_value = None
+    monkeypatch.setattr(main, "cache", cache)
+    monkeypatch.setenv("MOCK_LLM", "true")
+    monkeypatch.setattr(
+        main,
+        "analyze_reviews",
+        lambda reviews: LLMABSAOutput(),
+    )
 
+    request = AnalyzeRequest.model_validate(payload())
+    response = main.analyze(request)
+
+    assert response.analysis_mode == "mock"
+
+
+def test_analysis_mode_gemini(monkeypatch):
+    cache = Mock()
+    cache.get.return_value = None
+    monkeypatch.setattr(main, "cache", cache)
+    monkeypatch.setenv("MOCK_LLM", "false")
+    monkeypatch.setattr(
+        main,
+        "analyze_reviews",
+        lambda reviews: LLMABSAOutput(),
+    )
+
+    request = AnalyzeRequest.model_validate(payload())
+    response = main.analyze(request)
+
+    assert response.analysis_mode == "gemini"
+
+
+def test_cache_hit_preserves_original_analysis_mode(client, monkeypatch):
+    monkeypatch.setenv("MOCK_LLM", "true")
+
+    request = AnalyzeRequest.model_validate(payload())
+
+    first_response = main.analyze(request)
+    assert first_response.analysis_mode == "mock"
+
+    # Change environment after the first analysis.
+    monkeypatch.setenv("MOCK_LLM", "false")
+
+    second_response = main.analyze(request)
+
+    assert second_response.cache_hit is True
+    assert second_response.analysis_mode == "mock"

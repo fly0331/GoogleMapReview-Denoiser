@@ -30,6 +30,7 @@ export interface TimelineBucket {
 
 export interface AnalyzeResponse {
   cache_hit: boolean;
+  analysis_mode: "mock" | "gemini";
   analyzed_count: number;
   metrics: Record<string, number | null>;
   anomaly_alert: boolean;

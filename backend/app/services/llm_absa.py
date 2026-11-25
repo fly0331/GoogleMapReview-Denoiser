@@ -144,6 +144,13 @@ def _analyze_with_gemini(
 
     return validate_evidence_ids(output, reviews)
 
+def get_analysis_mode() -> str:
+    return (
+        "mock"
+        if os.getenv("MOCK_LLM", "false").lower() == "true"
+        else "gemini"
+    )
+
 
 def analyze_reviews(
     reviews: list[ReviewInput],

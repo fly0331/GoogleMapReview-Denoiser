@@ -294,3 +294,69 @@ def test_unknown_and_future_dates_do_not_affect_anomaly_statistics(scraped_at):
     assert alert is False
     assert historical_ratio is None
 
+
+
+def test_cleaner_short_praise_rules(scraped_at):
+    rows = [
+        ReviewInput(review_id="praise1", rating=5, text="讚"),
+        ReviewInput(review_id="praise2", rating=5, text="好吃"),
+        ReviewInput(review_id="praise3", rating=5, text="推"),
+        ReviewInput(review_id="long", rating=5, text="餐點非常好吃"),
+        ReviewInput(review_id="low", rating=3, text="讚"),
+    ]
+
+    cleaned = clean_reviews(rows, scraped_at)
+
+    assert [item.score for item in cleaned] == [1, 1, 1, 0, 0]
+    assert all(not item.suspicious for item in cleaned)
+
+
+def test_cleaner_inducement_keyword_threshold(scraped_at):
+    rows = [
+        ReviewInput(review_id="promo", rating=3, text="打卡送小菜"),
+        ReviewInput(review_id="normal", rating=5, text="五星級的服務品質"),
+        ReviewInput(review_id="plain", rating=5, text="服務很好"),
+    ]
+
+    cleaned = clean_reviews(rows, scraped_at)
+
+    assert cleaned[0].suspicious is True
+    assert cleaned[0].score == 2
+    assert cleaned[1].suspicious is True
+    assert cleaned[2].suspicious is False
+
+
+@pytest.mark.parametrize(
+    ("relative_time", "expected_month"),
+    [
+        ("3 天前", "2026-11"),
+        ("2 小時前", "2026-11"),
+        ("1 個月前", "2026-10"),
+        ("2 months ago", "2026-09"),
+        ("3 days ago", "2026-11"),
+        ("1 year ago", "2025-11"),
+        ("2 年前", "2024-11"),
+    ],
+)
+def test_relative_time_supports_common_units(
+    scraped_at, relative_time, expected_month
+):
+    review = ReviewInput(
+        review_id="relative",
+        rating=5,
+        text="good",
+        relative_time=relative_time,
+    )
+
+    assert review_month(review, scraped_at) == expected_month
+
+
+def test_unknown_relative_time_falls_back_to_scraped_month(scraped_at):
+    review = ReviewInput(
+        review_id="unknown",
+        rating=5,
+        text="good",
+        relative_time="a while ago",
+    )
+
+    assert review_month(review, scraped_at) == scraped_at.strftime("%Y-%m")

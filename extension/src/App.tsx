@@ -18,9 +18,18 @@ interface CollectionMessage {
 type AnalysisStatus = "idle" | "collecting" | "analyzing" | "done";
 
 function formatMetricLabel(key: string): string {
-  return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  const labels: Record<string, string> = {
+    inducement_keyword: "誘導性關鍵字",
+    fresh_account_five_star: "新帳號五星評論",
+    short_praise: "極短好評",
+  };
+
+  return (
+    labels[key] ??
+    key
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+  );
 }
 
 function formatMetricValue(value: number | null): string {
@@ -125,7 +134,7 @@ export default function App() {
     setReviewCount(0);
     setReviews([]);
     setPlaceId(null);
-    
+
 
     try {
       setStatus("collecting");
@@ -184,16 +193,37 @@ export default function App() {
           Review Cleaner & Sentiment Analysis
         </p>
       </header>
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5">
-        <span className="h-2 w-2 rounded-full bg-amber-500" />
-        <span className="text-xs font-semibold text-amber-700">
-          MOCK MODE
-        </span>
-      </div>
+      {result && (
+        <>
+          <div
+            className={`mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${result.analysis_mode === "mock"
+                ? "border-amber-200 bg-amber-50"
+                : "border-emerald-200 bg-emerald-50"
+              }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${result.analysis_mode === "mock"
+                  ? "bg-amber-500"
+                  : "bg-emerald-500"
+                }`}
+            />
+            <span
+              className={`text-xs font-semibold ${result.analysis_mode === "mock"
+                  ? "text-amber-700"
+                  : "text-emerald-700"
+                }`}
+            >
+              {result.analysis_mode === "mock" ? "MOCK MODE" : "GEMINI MODE"}
+            </span>
+          </div>
 
-      <p className="mt-2 text-xs text-slate-500">
-        目前使用模擬 LLM 分析結果，尚未連接正式 Gemini API。
-      </p>
+          <p className="mt-2 text-xs text-slate-500">
+            {result.analysis_mode === "mock"
+              ? "目前使用模擬 LLM 分析結果。"
+              : "目前使用 Gemini API 進行正式 LLM 分析。"}
+          </p>
+        </>
+      )}
 
       <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="font-medium">分析商家評論</h2>

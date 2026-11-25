@@ -102,6 +102,7 @@ class TimelineBucket(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     cache_hit: bool
+    analysis_mode: Literal["mock", "gemini"]
     analyzed_count: int
     metrics: dict[str, int | float | None]
     anomaly_alert: bool
