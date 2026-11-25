@@ -41,6 +41,11 @@ export interface AnalyzeResponse {
   suspicious_reasons_breakdown: Record<string, number>;
 }
 
+export interface ApiErrorDetail {
+  code: string;
+  message: string;
+}
+
 export interface ApiErrorResponse {
-  detail?: string;
+  detail?: string | ApiErrorDetail;
 }

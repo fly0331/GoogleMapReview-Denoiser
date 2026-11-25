@@ -197,3 +197,29 @@ def test_cache_hit_preserves_original_analysis_mode(client, monkeypatch):
 
     assert second_response.cache_hit is True
     assert second_response.analysis_mode == "mock"
+    
+def test_llm_error_returns_standard_error_response(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.services.llm_absa import LLMTimeoutError
+
+    cache = Mock()
+    cache.get.return_value = None
+    monkeypatch.setattr(main, "cache", cache)
+    monkeypatch.setattr(
+        main,
+        "analyze_reviews",
+        lambda reviews: (_ for _ in ()).throw(LLMTimeoutError()),
+    )
+
+    response = TestClient(main.app).post(
+        "/api/v1/analyze",
+        json=payload(),
+    )
+
+    assert response.status_code == 504
+    assert response.json() == {
+        "detail": {
+            "code": "LLM_TIMEOUT",
+            "message": "AI 分析逾時，請稍後再試。",
+        }
+    }

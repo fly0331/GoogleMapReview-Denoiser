@@ -1,7 +1,8 @@
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
@@ -9,11 +10,30 @@ from app.api.health import router as health_router
 from app.cache import SQLiteCache, create_fingerprint
 from app.core.schemas import AnalyzeRequest, AnalyzeResponse
 from app.services.cleaner import clean_reviews
-from app.services.llm_absa import analyze_reviews, get_analysis_mode
+from app.services.llm_absa import (
+    LLMAnalysisError,
+    analyze_reviews,
+    get_analysis_mode,
+)
 from app.services.timeline import build_timeline
 
 
 app = FastAPI(title="Review Denoiser API", version="0.1.0")
+
+@app.exception_handler(LLMAnalysisError)
+async def llm_analysis_exception_handler(
+    request: Request,
+    exc: LLMAnalysisError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": {
+                "code": exc.code,
+                "message": exc.message,
+            }
+        },
+    )
 
 origins = [
     origin.strip()

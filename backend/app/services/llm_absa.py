@@ -7,6 +7,54 @@ from pydantic import ValidationError
 from app.core.schemas import LLMABSAOutput, ReviewInput
 
 
+class LLMAnalysisError(Exception):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+
+
+class LLMNotConfiguredError(LLMAnalysisError):
+    def __init__(self):
+        super().__init__(
+            code="LLM_NOT_CONFIGURED",
+            message="AI 分析服務尚未完成設定。",
+            status_code=503,
+        )
+
+
+class LLMTimeoutError(LLMAnalysisError):
+    def __init__(self):
+        super().__init__(
+            code="LLM_TIMEOUT",
+            message="AI 分析逾時，請稍後再試。",
+            status_code=504,
+        )
+
+
+class LLMServiceUnavailableError(LLMAnalysisError):
+    def __init__(self):
+        super().__init__(
+            code="LLM_SERVICE_UNAVAILABLE",
+            message="AI 分析服務暫時無法使用，請稍後再試。",
+            status_code=503,
+        )
+
+
+class LLMInvalidResponseError(LLMAnalysisError):
+    def __init__(self):
+        super().__init__(
+            code="LLM_INVALID_RESPONSE",
+            message="AI 分析結果格式異常，請稍後再試。",
+            status_code=502,
+        )
+
 def validate_evidence_ids(
     output: LLMABSAOutput,
     reviews: list[ReviewInput],
@@ -86,7 +134,7 @@ def _analyze_with_gemini(
 ) -> LLMABSAOutput:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is required when MOCK_LLM is disabled")
+        raise LLMNotConfiguredError()
 
     model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
     client = genai.Client(api_key=api_key)
@@ -136,11 +184,15 @@ def _analyze_with_gemini(
         output = LLMABSAOutput.model_validate_json(interaction.output_text)
 
     except ValidationError as exc:
-        raise RuntimeError("Gemini returned invalid ABSA output") from exc
+        raise LLMInvalidResponseError() from exc
     except Exception as exc:
-        if isinstance(exc, RuntimeError):
+        if isinstance(exc, LLMAnalysisError):
             raise
-        raise RuntimeError(f"Gemini API request failed: {exc}") from exc
+
+        if isinstance(exc, TimeoutError) or "timeout" in str(exc).lower():
+            raise LLMTimeoutError() from exc
+
+        raise LLMServiceUnavailableError() from exc
 
     return validate_evidence_ids(output, reviews)
 

@@ -70,8 +70,10 @@ def test_missing_api_key_raises_error(
     monkeypatch.setenv("MOCK_LLM", "false")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+    with pytest.raises(llm_absa.LLMNotConfiguredError) as exc_info:
         llm_absa.analyze_reviews(reviews)
+        
+    assert exc_info.value.code == "LLM_NOT_CONFIGURED"
 
 
 def test_empty_reviews_do_not_call_gemini(monkeypatch):
@@ -180,11 +182,10 @@ def test_invalid_gemini_output_raises_error(
         FakeClient,
     )
 
-    with pytest.raises(
-        RuntimeError,
-        match="Gemini returned invalid ABSA output",
-    ):
+    with pytest.raises(llm_absa.LLMInvalidResponseError) as exc_info:
         llm_absa.analyze_reviews(reviews)
+        
+    assert exc_info.value.code == "LLM_INVALID_RESPONSE"
 
 
 def test_invalid_evidence_items_are_removed(reviews):
@@ -327,3 +328,58 @@ def test_evidence_ids_are_normalized():
     )
 
     assert output.pros[0].evidence_review_ids == ["review-1"]
+    
+def test_gemini_timeout_raises_timeout_error(
+    reviews,
+    monkeypatch,
+):
+    monkeypatch.setenv("MOCK_LLM", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    class FakeInteractions:
+        def create(self, **kwargs):
+            raise TimeoutError("request timed out")
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.interactions = FakeInteractions()
+
+    monkeypatch.setattr(
+        llm_absa.genai,
+        "Client",
+        FakeClient,
+    )
+
+    with pytest.raises(llm_absa.LLMTimeoutError) as exc_info:
+        llm_absa.analyze_reviews(reviews)
+
+    assert exc_info.value.code == "LLM_TIMEOUT"
+
+
+def test_gemini_service_error_raises_unavailable_error(
+    reviews,
+    monkeypatch,
+):
+    monkeypatch.setenv("MOCK_LLM", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    class FakeInteractions:
+        def create(self, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.interactions = FakeInteractions()
+
+    monkeypatch.setattr(
+        llm_absa.genai,
+        "Client",
+        FakeClient,
+    )
+
+    with pytest.raises(
+        llm_absa.LLMServiceUnavailableError
+    ) as exc_info:
+        llm_absa.analyze_reviews(reviews)
+
+    assert exc_info.value.code == "LLM_SERVICE_UNAVAILABLE"
