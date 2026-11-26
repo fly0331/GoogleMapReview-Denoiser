@@ -2,6 +2,8 @@
 import json
 import time
 
+import pytest
+
 from app.cache import SQLiteCache, create_fingerprint
 
 
@@ -129,3 +131,27 @@ def test_cache_cleans_expired_entries_on_initialization(cache_path):
         ).fetchone()
 
     assert row is None
+
+@pytest.mark.parametrize("legacy_version", [2, 3])
+def test_old_envelopes_miss_and_v4_envelope_can_be_read(cache_path, legacy_version):
+    cache = SQLiteCache(cache_path)
+    legacy = {
+        "format_version": legacy_version,
+        "fingerprint": "fingerprint-a",
+        "response": {"decision_summary": "old", "decision_insights": []},
+    }
+    with cache._connect() as connection:
+        connection.execute(
+            "INSERT INTO cache (place_id, value, cached_at) VALUES (?, ?, ?)",
+            ("p1", json.dumps(legacy), time.time()),
+        )
+
+    assert cache.get("p1", "fingerprint-a") is None
+
+    response = {"decision_pros": "new", "decision_cons": "", "practical_visit_information": []}
+    cache.set("p1", "fingerprint-a", response)
+    assert cache.get("p1", "fingerprint-a") == response
+
+    with cache._connect() as connection:
+        row = connection.execute("SELECT value FROM cache WHERE place_id = ?", ("p1",)).fetchone()
+    assert json.loads(row[0])["format_version"] == 4

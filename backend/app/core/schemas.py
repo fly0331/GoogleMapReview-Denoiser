@@ -84,8 +84,31 @@ class RecommendedDish(BaseModel):
             rid.strip() for rid in value if rid.strip()
         ))
 
+VisitInformationCategory = Literal[
+    "budget", "wait_time", "reservation", "parking", "dining_time_limit", "payment", "other",
+]
 
-class LLMABSAOutput(BaseModel):
+
+class PracticalVisitInformation(BaseModel):
+    category: VisitInformationCategory
+    summary: str = Field(min_length=1)
+    evidence_review_ids: list[str] = Field(min_length=1)
+
+
+class VisitInformationSource(BaseModel):
+    review_id: str
+    quote: str = Field(min_length=1)
+
+
+class GeminiVisitInformation(BaseModel):
+    category: VisitInformationCategory
+    summary: str = Field(min_length=1)
+    sources: list[VisitInformationSource] = Field(min_length=1)
+
+
+class ABSAInsights(BaseModel):
+    decision_pros: str
+    decision_cons: str
     pros: list[ReviewAnalysis] = Field(default_factory=list)
     cons: list[ReviewAnalysis] = Field(default_factory=list)
     aspect_scores: dict[str, float] = Field(default_factory=dict)
@@ -118,6 +141,15 @@ class LLMABSAOutput(BaseModel):
         return normalized
 
 
+class LLMABSAOutput(ABSAInsights):
+    practical_visit_information: list[PracticalVisitInformation] = Field(default_factory=list)
+    model_id: str | None = None
+
+
+class GeminiABSAOutput(ABSAInsights):
+    practical_visit_information: list[GeminiVisitInformation]
+
+
 class TimelineBucket(BaseModel):
     month: str
     review_count: int
@@ -128,14 +160,14 @@ class TimelineBucket(BaseModel):
 class AnalyzeResponse(BaseModel):
     cache_hit: bool
     analysis_mode: Literal["mock", "gemini"]
+    model_id: str | None = None
     analyzed_count: int
-    metrics: dict[str, int | float | None]
-    anomaly_alert: bool
-    timeline: list[TimelineBucket]
     aspect_scores: dict[str, float]
     pros: list[ReviewAnalysis]
     cons: list[ReviewAnalysis]
+    decision_pros: str
+    decision_cons: str
     recommended_dishes: list[RecommendedDish] = Field(
         default_factory=list,
     )
-    suspicious_reasons_breakdown: dict[str, int]
+    practical_visit_information: list[PracticalVisitInformation]

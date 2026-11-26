@@ -1,4 +1,4 @@
-# Google Maps Review Denoiser — Data Usage Specification
+# AI Consumer Decision Assistant — Data Usage Specification
 
 - **Document status:** Draft for compliance review
 - **Repository:** `fly0331/GoogleMapReview-Denoiser`
@@ -9,7 +9,7 @@
 
 ## 1. Product purpose and user interaction
 
-Google Maps Review Denoiser is a Chrome Extension intended to help a general Google Maps user understand a business's customer reviews. The user opens a Google Maps place page and explicitly clicks **「分析目前商家」** in the extension. The extension then collects review information from the currently displayed Google Maps page, sends it to the configured FastAPI backend, and displays the resulting analysis.
+AI Consumer Decision Assistant is a Chrome Extension that summarizes Google Maps reviews into decision guidance, practical visit information, recommended dishes, and aspect analysis. The user opens a Google Maps place page and explicitly clicks **「分析目前商家」** in the extension. The extension then collects review information from the currently displayed Google Maps page, sends it to the configured FastAPI backend, and displays the resulting analysis.
 
 The intended product is free to use, with no advertisements, subscription fees, sale of review data, or direct monetization of review data.
 
@@ -27,14 +27,14 @@ The intended product is free to use, with no advertisements, subscription fees, 
 
 | Field | Description | Observed use |
 |---|---|---|
-| `place_id` | Place identifier parsed from the Google Maps page URL | Backend cache key and request context; displayed in extension |
+| `place_id` | Place identifier parsed from the Google Maps page URL | Backend cache key and request context |
 | `review_id` | Review identifier from the review card's `data-review-id` attribute | Deduplication, evidence linking, Gemini input |
-| `rating` | Star rating parsed from an accessibility label | Cleaner, Timeline, Gemini input |
-| `text` | Review text displayed in the review card after expansion | Cleaner, Gemini input, evidence display |
-| `relative_time` | Relative date text displayed in the review card | Backend date estimation for Timeline |
-| `author_reviews_count` | Review count shown for the review author, when parseable | Cleaner heuristic for suspicious reviews |
+| `rating` | Star rating parsed from an accessibility label | Gemini input and original review display |
+| `text` | Review text displayed in the review card after expansion | Review selection, Gemini input, and evidence display |
+| `relative_time` | Relative date text displayed in the review card | Original review display |
+| `author_reviews_count` | Review count shown for the review author, when parseable | Retained in the request and fingerprint; not used for selection |
 | `review_date` | Absolute review date field | Currently always set to `null` by the content script |
-| `scraped_at` | UTC timestamp generated when collection completes | Backend date reference for relative-time conversion |
+| `scraped_at` | UTC timestamp generated when collection completes | Request timestamp |
 
 The current implementation does not collect reviewer names, profile photos, email addresses, phone numbers, or precise user location as explicit review fields. This statement is limited to the inspected collection code and should be rechecked if the implementation changes.
 
@@ -59,15 +59,15 @@ The FastAPI backend:
 1. Validates the request, including a maximum of 120 reviews, a maximum review text length of 5,000 characters, and a maximum `place_id` length of 256 characters.
 2. Creates a SHA-256 fingerprint from the place ID and serialized review payload.
 3. Checks the SQLite cache.
-4. On a cache miss, applies the Cleaner rules and builds the Timeline.
+4. On a cache miss, selects reviews with unique nonblank IDs and usable text within the Gemini budget.
 5. Sends eligible reviews to the configured LLM analysis implementation.
 6. Returns analysis results and stores the response in the SQLite cache.
 
-A cache hit returns the cached analysis response without repeating Cleaner, Timeline, or Gemini analysis.
+A cache hit returns the cached analysis response without repeating selection or Gemini analysis.
 
 ### 3.3 Backend to Gemini
 
-When `MOCK_LLM` is not enabled, the backend sends eligible, non-suspicious reviews with non-empty text to the Gemini API.
+When `MOCK_LLM` is not enabled, the backend sends the selected reviews with non-empty text to the Gemini API in a single call. When none qualify, it skips the call.
 
 The Gemini input contains only:
 
@@ -77,38 +77,26 @@ The Gemini input contains only:
 
 It does not include the `place_id`, `scraped_at`, `relative_time`, `author_reviews_count`, or `review_date` fields in the inspected implementation.
 
-The implementation limits a Gemini request to 50 eligible reviews and 20,000 total review-text characters. It does not intentionally truncate text to fit those limits. The configured model defaults to `gemini-3.5-flash-lite`, and the API key is read by the backend from `GEMINI_API_KEY`; it is not embedded in the extension code.
+The implementation limits a Gemini request to 50 eligible reviews and 20,000 total review-text characters. It uses an ID-based deterministic order to allocate the budget and skips reviews that do not fit; review text is not truncated. The configured model defaults to `gemini-3.5-flash-lite`, and the API key is read by the backend from `GEMINI_API_KEY`; it is not embedded in the extension code.
 
 The actual Gemini account tier, applicable service terms, retention settings, and data-use settings are operational/account facts and cannot be established from repository code. They must be verified before release.
 
 ## 4. Analysis and derived data
 
-### 4.1 Cleaner
+Gemini returns a decision summary, practical visit information, recommended dishes, positive and negative aspect summaries, and aspect scores in one Structured Output response. Practical categories cover budget, wait time, reservations, parking, dining time limits, payment, and other actionable details.
 
-The backend evaluates review text, rating, and author review count using heuristic rules. It generates suspicious-review flags, scores, and reason labels. These are derived outputs, not additional source fields.
-
-### 4.2 Timeline
-
-The backend estimates review dates from `relative_time` when `review_date` is unavailable. It groups accepted reviews by month and calculates review counts and negative-review ratios. The anomaly alert compares the recent 60-day negative ratio with the historical ratio, subject to the implemented sample-size and history conditions.
-
-### 4.3 Gemini ABSA
-
-Gemini produces structured positive and negative aspects, summaries, evidence review IDs, and aspect scores. The backend validates evidence IDs against the eligible review IDs and filters invalid or inconsistent results.
+The backend checks evidence IDs against the reviews actually sent to Gemini. It also verifies that each practical item's source quote occurs in the corresponding review, checks written numbers and common adjacent units against the verified quotes, and omits unsupported items. Source quotes are used during validation and are not included in the API response.
 
 ## 5. Data returned to the extension
 
 The backend response includes:
 
 - `cache_hit` and `analysis_mode`
-- analyzed count and aggregate metrics
-- anomaly alert
-- monthly Timeline buckets
-- aspect scores
-- positive and negative aspect summaries
-- suspicious-reason counts
-- evidence review IDs associated with aspect summaries
+- Number of reviews selected for analysis
+- Decision summary, recommended dishes, pros and cons, and aspect scores
+- Verified practical visit information and its evidence review IDs
 
-The extension retains the collected reviews in React application state and uses evidence review IDs to display the corresponding original review text, rating, and date information. The inspected code does not show the extension writing review content to `chrome.storage`.
+The extension retains the collected reviews in React application state and displays original evidence for Pros / Cons. Practical visit information shows the derived summary and categorization in the side panel. The inspected code does not show the extension writing review content to `chrome.storage`.
 
 ## 6. Storage and retention
 
@@ -120,7 +108,7 @@ The backend SQLite cache stores:
 - a JSON envelope containing cache format version, request fingerprint, and serialized analysis response
 - cache timestamp
 
-The cached response contains derived analysis results and evidence review IDs. The inspected response schema does not include the original review text.
+The cached response contains derived analysis results and evidence review IDs. The response does not include a separate original review text or verification quote field. Derived summaries, including deterministic Mock summaries, may reproduce excerpts from the reviews.
 
 The application enforces a seven-day cache TTL and deletes expired entries during initialization, cache writes, and expired cache reads. This is an application-level expiry policy; it is not a guarantee that all filesystem, SQLite WAL/SHM, backup, snapshot, or infrastructure copies are immediately and irreversibly erased.
 
@@ -203,7 +191,6 @@ The following files on the `master` branch were inspected for this draft:
 - `backend/app/core/schemas.py`
 - `backend/app/cache.py`
 - `backend/app/services/llm_absa.py`
-- `backend/app/services/cleaner.py`
-- `backend/app/services/timeline.py`
+- `backend/app/services/review_selection.py`
 
 This inventory should be updated whenever collection, transmission, storage, provider, or deployment behavior changes.

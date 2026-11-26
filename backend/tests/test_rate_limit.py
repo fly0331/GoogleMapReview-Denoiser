@@ -58,7 +58,7 @@ def test_analyze_endpoint_returns_429_when_limit_exceeded(
     monkeypatch.setattr(
         main,
         "analyze_reviews",
-        lambda reviews: LLMABSAOutput(),
+        lambda reviews: LLMABSAOutput(decision_pros="", decision_cons=""),
     )
 
     client = TestClient(main.app)

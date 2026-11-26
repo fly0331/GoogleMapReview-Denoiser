@@ -1,6 +1,11 @@
 
 import { useState } from "react";
-import type { AnalyzeRequest, AnalyzeResponse } from "./types";
+import type {
+  AnalyzeRequest,
+  AnalyzeResponse,
+  PracticalVisitInformation,
+  VisitInformationCategory,
+} from "./types";
 import { analyzeReviews } from "./api";
 
 interface CollectionResult {
@@ -17,29 +22,6 @@ interface CollectionMessage {
 
 type AnalysisStatus = "idle" | "collecting" | "analyzing" | "done";
 
-function formatMetricLabel(key: string): string {
-  const labels: Record<string, string> = {
-    inducement_keyword: "誘導性關鍵字",
-    fresh_account_five_star: "新帳號五星評論",
-    short_praise: "極短好評",
-  };
-
-  return (
-    labels[key] ??
-    key
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (char) => char.toUpperCase())
-  );
-}
-
-function formatMetricValue(value: number | null): string {
-  if (value === null) return "N/A";
-
-  if (Number.isInteger(value)) return value.toLocaleString();
-
-  return value.toFixed(2);
-}
-
 function formatReviewDate(
   reviewDate: string | null,
   relativeTime: string | null
@@ -55,6 +37,84 @@ function formatReviewDate(
   }
 
   return null;
+}
+
+function formatAspect(aspect: string): string {
+  const labels: Record<string, string> = {
+    food: "餐點品質",
+    service: "服務品質",
+    price: "價格",
+    environment: "用餐環境",
+    portion: "餐點份量",
+    waiting_time: "等候時間",
+    overall: "整體評價",
+  };
+
+  return labels[aspect] ?? aspect;
+}
+
+const ASPECT_SCORE_BANDS = [
+  { minimum: 4, color: "bg-emerald-600", label: "良好", range: "4–5" },
+  { minimum: 3, color: "bg-amber-500", label: "普通", range: "3–<4" },
+  { minimum: 1, color: "bg-red-500", label: "有待改善", range: "1–<3" },
+] as const;
+
+function AspectRatingBars({ scores }: { scores?: AnalyzeResponse["aspect_scores"] }) {
+  const ratings = Object.entries(scores ?? {})
+    .filter(([aspect, score]) =>
+      aspect.trim() && Number.isFinite(score) && score >= 1 && score <= 5
+    )
+    .sort(([, first], [, second]) => second - first);
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2">
+          <h2 className="font-semibold">各面向評分</h2>
+          <span aria-hidden="true" className="shrink-0 text-xs text-blue-700">
+            <span className="group-open:hidden">展開查看 ▾</span>
+            <span className="hidden group-open:inline">收合 ▴</span>
+          </span>
+        </summary>
+
+        {ratings.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">目前沒有可用的面向評分。</p>
+        ) : (
+          <>
+            <ul className="mt-4 space-y-3">
+              {ratings.map(([aspect, score]) => {
+                const band = ASPECT_SCORE_BANDS.find(({ minimum }) => score >= minimum)
+                  ?? ASPECT_SCORE_BANDS[2];
+
+                return (
+                  <li key={aspect}>
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                      <span className="min-w-0 break-words">{formatAspect(aspect)}</span>
+                      <span className="shrink-0 font-medium tabular-nums">
+                        {score} / 5<span className="sr-only">（{band.label}）</span>
+                      </span>
+                    </div>
+                    <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div className={`h-full rounded-full ${band.color}`} style={{ width: `${(score / 5) * 100}%` }} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <ul aria-label="評分圖例" className="mt-4 flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-600">
+              {ASPECT_SCORE_BANDS.map(({ color, label, range }) => (
+                <li key={label} className="flex items-center gap-1.5">
+                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${color}`} />
+                  <span>{label} {range}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </details>
+    </section>
+  );
 }
 
 function EvidenceList({
@@ -118,23 +178,172 @@ function EvidenceList({
   );
 }
 
+
+function DecisionSummary({
+  decisionPros,
+  decisionCons,
+}: {
+  decisionPros: string;
+  decisionCons: string;
+}) {
+  return (
+    <section className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">💡</span>
+        <h2 className="font-semibold">消費決策摘要</h2>
+      </div>
+
+      <div className="mt-4">
+        <h3 className="text-sm font-semibold text-emerald-700">值得推薦</h3>
+        <p className="mt-1 text-sm leading-5 text-slate-600">
+          {decisionPros || "目前評論資訊不足。"}
+        </p>
+      </div>
+
+      <div className="mt-4">
+        <h3 className="text-sm font-semibold text-red-700">消費前須注意</h3>
+        <p className="mt-1 text-sm leading-5 text-slate-600">
+          {decisionCons || "目前評論資訊不足。"}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+
+const visitCategories: Record<VisitInformationCategory, { label: string; icon: string }> = {
+  budget: { label: "消費預算", icon: "💰" },
+  wait_time: { label: "候位時間", icon: "⏳" },
+  reservation: { label: "訂位建議", icon: "📅" },
+  parking: { label: "停車資訊", icon: "🅿️" },
+  dining_time_limit: { label: "用餐時間限制", icon: "⏱️" },
+  payment: { label: "付款方式", icon: "💳" },
+  other: { label: "其他實用資訊", icon: "ℹ️" },
+};
+
+function VisitInformation({ items }: { items: PracticalVisitInformation[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 className="font-semibold">消費實用資訊</h2>
+      <ul className="mt-3 divide-y divide-slate-100">
+        {Object.entries(visitCategories).map(([category, { label, icon }]) =>
+          items.filter((item) => item.category === category).map(({ summary }, index) => (
+            <li className="flex items-start gap-3 py-3 first:pt-0" key={category + "-" + index}>
+              <span aria-hidden="true" className="shrink-0">{icon}</span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">{label}</h3>
+                <p className="mt-1 break-words text-sm leading-6 text-slate-600">{summary}</p>
+              </div>
+            </li>
+          ))
+        )}
+      </ul>
+      <p className="mt-2 text-xs leading-5 text-slate-500">
+        資訊整理自評論，實際價格與店家政策可能有所變動。
+      </p>
+    </section>
+  );
+}
+
+function AspectAnalysisList({
+  items,
+  reviews,
+  type,
+}: {
+  items: AnalyzeResponse["pros"];
+  reviews: AnalyzeRequest["reviews"];
+  type: "pros" | "cons";
+}) {
+  const isPros = type === "pros";
+
+  const sortedItems = [...items].sort(
+    (a, b) =>
+      b.evidence_review_ids.length - a.evidence_review_ids.length
+  );
+
+  const badgeColor = isPros
+    ? "bg-emerald-50 text-emerald-700"
+    : "bg-red-50 text-red-700";
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold">
+          {isPros ? "優點 Pros" : "缺點 Cons"}
+        </h2>
+      </div>
+
+      {sortedItems.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-500">
+          {isPros ? "尚無優點分析結果。" : "尚無缺點分析結果。"}
+        </p>
+      ) : (
+        <div className="mt-3 space-y-4">
+          {sortedItems.map((item, index) => (
+            <div
+              className="border-b border-slate-100 pb-4 last:border-0 last:pb-0"
+              key={`${item.aspect}-${index}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-800">
+                  {formatAspect(item.aspect)}
+                </p>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${badgeColor}`}
+                >
+                  {item.evidence_review_ids.length} 則評論
+                </span>
+              </div>
+
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {item.summary}
+              </p>
+
+              <EvidenceList
+                evidenceIds={item.evidence_review_ids}
+                reviews={reviews}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SectionHeading({
+  label,
+  title,
+}: {
+  label: string;
+  title: string;
+}) {
+  return (
+    <div className="border-t border-slate-200 pt-4">
+      <h2 className="text-xs font-semibold tracking-wider text-slate-400">
+        {label}
+      </h2>
+      <p className="mt-1 text-sm font-medium text-slate-700">
+        {title}
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [reviews, setReviews] = useState<AnalyzeRequest["reviews"]>([]);
-  const [reviewCount, setReviewCount] = useState(0);
-  const [placeId, setPlaceId] = useState<string | null>(null);
 
   const isLoading = status === "collecting" || status === "analyzing";
 
   async function handleAnalyze() {
     setError(null);
     setResult(null);
-    setReviewCount(0);
     setReviews([]);
-    setPlaceId(null);
-
 
     try {
       setStatus("collecting");
@@ -161,9 +370,8 @@ export default function App() {
       if (collection.reviews.length === 0) {
         throw new Error("沒有找到可分析的評論。");
       }
+
       setReviews(collection.reviews);
-      setReviewCount(collection.reviews.length);
-      setPlaceId(collection.place_id);
       setStatus("analyzing");
 
       const request: AnalyzeRequest = {
@@ -188,30 +396,34 @@ export default function App() {
     <main className="min-h-screen bg-slate-50 p-5 text-slate-900">
       <header className="border-b border-slate-200 pb-4">
         <p className="text-sm font-medium text-blue-700">Google Maps</p>
-        <h1 className="mt-1 text-xl font-semibold">評論去噪器</h1>
+        <h1 className="mt-1 text-xl font-semibold">AI 消費決策助手</h1>
         <p className="mt-1 text-xs text-slate-500">
-          Review Cleaner & Sentiment Analysis
+          AI Consumer Decision Assistant
         </p>
       </header>
+
       {result && (
         <>
           <div
-            className={`mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${result.analysis_mode === "mock"
+            className={`mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${
+              result.analysis_mode === "mock"
                 ? "border-amber-200 bg-amber-50"
                 : "border-emerald-200 bg-emerald-50"
-              }`}
+            }`}
           >
             <span
-              className={`h-2 w-2 rounded-full ${result.analysis_mode === "mock"
+              className={`h-2 w-2 rounded-full ${
+                result.analysis_mode === "mock"
                   ? "bg-amber-500"
                   : "bg-emerald-500"
-                }`}
+              }`}
             />
             <span
-              className={`text-xs font-semibold ${result.analysis_mode === "mock"
+              className={`text-xs font-semibold ${
+                result.analysis_mode === "mock"
                   ? "text-amber-700"
                   : "text-emerald-700"
-                }`}
+              }`}
             >
               {result.analysis_mode === "mock" ? "MOCK MODE" : "GEMINI MODE"}
             </span>
@@ -220,7 +432,9 @@ export default function App() {
           <p className="mt-2 text-xs text-slate-500">
             {result.analysis_mode === "mock"
               ? "目前使用模擬 LLM 分析結果。"
-              : "目前使用 Gemini API 進行正式 LLM 分析。"}
+              : result.model_id
+                ? "本次使用 " + result.model_id + " 進行 AI 評論分析。"
+                : "本次分析的模型名稱未記錄。"}
           </p>
         </>
       )}
@@ -258,223 +472,79 @@ export default function App() {
             {error}
           </div>
         )}
-
-        {placeId && (
-          <p className="mt-3 break-all text-xs text-slate-400">
-            Place ID: {placeId}
-          </p>
-        )}
       </section>
 
       {result && (
         <div className="mt-5 space-y-4">
+          {/* 第一層：消費決策 */}
+          <SectionHeading
+            label="CONSUMER INSIGHTS"
+            title="先看結論"
+          />
+
+          <DecisionSummary
+            decisionPros={result.decision_pros}
+            decisionCons={result.decision_cons}
+          />
+
+          <VisitInformation items={result.practical_visit_information} />
+
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">分析摘要</h2>
-              {result.cache_hit && (
-                <span className="rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700">
-                  Cache Hit
-                </span>
-              )}
-            </div>
+            <h2 className="font-semibold">最推薦餐點</h2>
 
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">擷取評論</p>
-                <p className="mt-1 text-2xl font-semibold">
-                  {reviewCount}
-                </p>
-              </div>
-
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">分析評論</p>
-                <p className="mt-1 text-2xl font-semibold">
-                  {result.analyzed_count}
-                </p>
-              </div>
-            </div>
-
-            {Object.keys(result.metrics).length > 0 && (
-              <div className="mt-4 space-y-2">
-                <h3 className="text-sm font-medium">Cleaner Metrics</h3>
-                {Object.entries(result.metrics).map(([key, value]) => (
+            {result.recommended_dishes.length === 0 ? (
+              <p className="mt-3 text-sm leading-6 text-slate-500">
+                目前評論中沒有足夠明確的餐點推薦資訊。
+              </p>
+            ) : (
+              <div className="mt-3 space-y-4">
+                {result.recommended_dishes.map((dish, index) => (
                   <div
-                    className="flex items-center justify-between border-b border-slate-100 py-2 text-sm"
-                    key={key}
+                    className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-0 last:pb-0"
+                    key={`${dish.name}-${index}`}
                   >
-                    <span className="text-slate-600">
-                      {formatMetricLabel(key)}
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-sm font-semibold text-amber-700">
+                      {index + 1}
                     </span>
-                    <span className="font-medium">
-                      {formatMetricValue(value)}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="break-words text-sm font-semibold text-slate-900">
+                        {dish.name}
+                      </h3>
+                      <p className="mt-1 break-words text-sm leading-6 text-slate-600">
+                        {dish.summary}
+                      </p>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">負評趨勢</h2>
-              {result.anomaly_alert && (
-                <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700">
-                  異常警示
-                </span>
-              )}
-            </div>
+          {/* 第二層：評論洞察 */}
+          <SectionHeading
+            label="REVIEW ANALYSIS"
+            title="深入了解評論"
+          />
 
-            {!result.timeline.length ? (
-              <p className="mt-3 text-sm text-slate-500">
-                尚無足夠的時間序列資料。
-              </p>
-            ) : (
-              <div className="mt-4 space-y-4">
-                {result.timeline.map((item) => (
-                  <div key={item.month}>
-                    <div className="mb-1 flex justify-between text-xs">
-                      <span className="font-medium">{item.month}</span>
-                      <span className="text-slate-500">
-                        {item.negative_count}/{item.review_count} 負評
-                        （{(item.negative_ratio * 100).toFixed(1)}%）
-                      </span>
-                    </div>
+          <AspectAnalysisList
+            items={result.pros}
+            reviews={reviews}
+            type="pros"
+          />
 
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-red-500"
-                        style={{
-                          width: `${Math.max(
-                            0,
-                            Math.min(100, item.negative_ratio * 100)
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <AspectAnalysisList
+            items={result.cons}
+            reviews={reviews}
+            type="cons"
+          />
 
-            {result.anomaly_alert && (
-              <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                最近的負評比例出現異常，建議進一步檢視近期評論。
-              </p>
-            )}
-          </section>
+          {/* 第三層：進階資訊 */}
+          <SectionHeading
+            label="ADVANCED INSIGHTS"
+            title="更多分析資訊"
+          />
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="font-semibold">可疑評論原因</h2>
-
-            {Object.keys(result.suspicious_reasons_breakdown).length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500">
-                沒有偵測到可疑評論原因。
-              </p>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {Object.entries(result.suspicious_reasons_breakdown).map(
-                  ([reason, count]) => (
-                    <div
-                      className="flex justify-between text-sm"
-                      key={reason}
-                    >
-                      <span className="text-slate-600">
-                        {formatMetricLabel(reason)}
-                      </span>
-                      <span className="font-medium">{count}</span>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="font-semibold">店家優點 Pros</h2>
-
-            {result.pros.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500">
-                尚無優點分析結果。
-              </p>
-            ) : (
-              <div className="mt-3 space-y-3">
-                {result.pros.map((item, index) => (
-                  <div
-                    className="border-b border-slate-100 pb-3 last:border-0"
-                    key={`${item.aspect}-${index}`}
-                  >
-                    <p className="text-sm font-medium">{item.aspect}</p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {item.summary}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      情感：{item.sentiment}
-                    </p>
-                    <EvidenceList
-                      evidenceIds={item.evidence_review_ids}
-                      reviews={reviews}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="font-semibold">店家缺點 Cons</h2>
-
-            {result.cons.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500">
-                尚無缺點分析結果。
-              </p>
-            ) : (
-              <div className="mt-3 space-y-3">
-                {result.cons.map((item, index) => (
-                  <div
-                    className="border-b border-slate-100 pb-3 last:border-0"
-                    key={`${item.aspect}-${index}`}
-                  >
-                    <p className="text-sm font-medium">{item.aspect}</p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {item.summary}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      情感：{item.sentiment}
-                    </p>
-                    <EvidenceList
-                      evidenceIds={item.evidence_review_ids}
-                      reviews={reviews}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {Object.keys(result.aspect_scores).length > 0 && (
-            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="font-semibold">面向評分</h2>
-
-              <div className="mt-3 space-y-3">
-                {Object.entries(result.aspect_scores).map(([aspect, score]) => (
-                  <div key={aspect}>
-                    <div className="mb-1 flex justify-between text-sm">
-                      <span>{aspect}</span>
-                      <span className="font-medium">{score.toFixed(2)}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-blue-600"
-                        style={{
-                          width: `${Math.max(0, Math.min(100, score * 100))}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+          <AspectRatingBars scores={result.aspect_scores} />
         </div>
       )}
     </main>

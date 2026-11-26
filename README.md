@@ -1,70 +1,31 @@
-# Google Maps Review De-noiser
+# AI Consumer Decision Assistant
 
-**An AI-powered Chrome Extension that analyzes Google Maps reviews, filters suspicious feedback, identifies sentiment patterns, and detects potential negative review trends.**
+A Chrome Extension that turns Google Maps reviews into a concise decision brief, practical visit information, recommended dishes, and aspect analysis with traceable review evidence.
 
-**一款 AI 的 Chrome 擴充叉件，分析 Google Maps 商家評論、過濾可疑評論、整理情感分析結果，並偵測潛在的負評趨勢。**
-
-
-
-## Overview | 專案介紹
-
-Google Maps reviews provide valuable insights into customer experiences, but manually reading hundreds of reviews can be time-consuming. Some reviews may also contain promotional content or suspicious feedback that affects the overall perception of a business.
-
-Google Maps 評論能反映消費者的真實體驗，但當評論數量龐大時，逐則閱讀相當耗時。此外，部分評論可能包含業配內容或可疑資訊，影響使用者對商家的判斷。
-
-**Google Maps Review De-noiser** addresses these problems through three core capabilities:
-
-本專案透過三項核心功能解決上述問題：
-
-1. **Review Cleaner** — Detects and filters potentially suspicious reviews.
-2. **Review Timeline** — Visualizes review trends and identifies unusual increases in negative feedback.
-3. **AI-powered Aspect-Based Sentiment Analysis (ABSA)** — Extracts business strengths and weaknesses with evidence linked to original reviews.
-
-
+將 Google Maps 評論整理為消費決策摘要、消費實用資訊、推薦餐點與可溯源的面向分析，方便在到訪前比較。
 
 ## Features | 核心功能
 
-### 1. Review Cleaner | 可疑評論過濾
+### 1. Consumer decision summary | 消費決策摘要
 
-- Identifies potentially promotional or suspicious reviews using rule-based heuristics.
-- Assigns suspicious scores based on review content, ratings, and reviewer activity.
-- Preserves original review information for traceability.
+Summarizes what reviewers recommend and what visitors should consider before going.
 
-- 使用規則式方法辨識可能的業配或可疑評論。
-- 根據評論內容、評分及評論者留言資訊計算可疑分數。
-- 保留原始評論資訊，方便追溯。
+### 2. Practical visit information | 消費實用資訊
 
-### 2. Review Timeline | 評論趨勢分析
+Surfaces review-backed budget, wait times, reservations, parking, dining time limits, payment, and other useful details. Prices and policies may change.
 
-**Anomaly Detection Rules**
-- Uses non-suspicious reviews with valid timestamps.
-- Compares negative review ratios between the recent 60-day period and historical data.
-- Requires at least 5 recent reviews.
-- Triggers an alert when the recent negative ratio exceeds 1.5 times the historical ratio.
-- Does not trigger alerts when historical data is unavailable.
+### 3. Dishes and aspect analysis | 推薦餐點與面向分析
 
-**異常偵測規則**
-- 僅使用非可疑且具有有效時間戳記的評論。
-- 比較近 60 天與歷史評論的負評比例。
-- 近期至少需要 5 則評論。
-- 當近期負評比例超過歷史比例的 1.5 倍時觸發警報。
-- 缺乏歷史資料時不觸發警報。
-
-### 3. AI-powered ABSA | AI 面向情感分析
-
-Uses Gemini Structured Output to extract structured business insights.
-
-透過 Gemini Structured Output，將評論轉換成結構化的商家分析結果。
-
+Displays recommended dishes, pros and cons linked to review evidence, and aspect scores. Gemini returns all four analysis areas in one Structured Output response.
 
 ### 4. Gemini / Mock Mode | AI 分析模式
 
 - **Gemini Mode:** Uses the Gemini API for real AI analysis.
-- **Mock Mode:** Uses predefined mock results for local development and testing.
+- **Mock Mode:** Derives deterministic mock results from the supplied reviews.
 - Displays the current analysis mode in the Extension UI.
 
 - **Gemini Mode：** 使用 Gemini API 進行實際 AI 分析。
-- **Mock Mode：** 使用預設模擬結果，方便本地開發與測試。
+- **Mock Mode：** 依輸入評論產生可重現的模擬結果，供本地開發與測試。
 - Extension UI 會顯示目前使用的分析模式。
 
 
@@ -77,19 +38,20 @@ flowchart TD
     B --> C[Review Extraction]
     C --> D[FastAPI Backend]
     D --> E[SQLite Cache]
-    D --> F[Review Cleaner]
-    F --> G[Timeline Analysis]
-    F --> H[Gemini ABSA]
+    E -->|Cache miss| F[Review Selection]
+    F --> H[Gemini Structured Output]
     H --> I[Evidence Validation]
-    G --> J[Analysis Response]
-    I --> J
-    E --> J
+    I -->|Store response| E
+    I --> J[Analysis Response]
+    E -->|Cache hit| J
     J --> K[Chrome Side Panel]
     K --> L[Review Insights]
 ```
 
 
 
+
+The backend selects up to 50 text-bearing reviews and 20,000 review-text characters. It deduplicates review IDs and applies a deterministic budget using review IDs. A cache miss with eligible reviews triggers one Gemini request; a cache hit reuses the result. Practical information is returned only when its source can be checked against the selected reviews.
 
 ## Tech Stack | 技術架構
 
@@ -99,7 +61,6 @@ flowchart TD
 | Frontend | React 18, TypeScript |
 | Build Tools | Vite, CRXJS |
 | Styling | Tailwind CSS |
-| Visualization | Recharts |
 | Backend | Python 3.11+, FastAPI |
 | Data Validation | Pydantic v2 |
 | Database / Cache | SQLite |
@@ -118,9 +79,9 @@ Review-Denoiser/
 │   │   ├── core/
 │   │   ├── schemas/
 │   │   ├── services/
-│   │   │   ├── cleaner.py
 │   │   │   ├── llm_absa.py
-│   │   │   └── timeline.py
+│   │   │   ├── review_selection.py
+│   │   │   └── ...
 │   │   ├── cache.py
 │   │   └── main.py
 │   ├── tests/
@@ -206,7 +167,7 @@ Load the Extension in Chrome:
 3. Click **Load unpacked**.
 4. Select the `extension/dist/` directory.
 
-Open Google Maps, navigate to a business, select its Reviews section, and open the Review Denoiser Side Panel.
+Open Google Maps, navigate to a business, select its Reviews section, and open the extension's Side Panel.
 
 
 
@@ -253,13 +214,11 @@ npm run build
 ## Future Improvements | 未來改善方向
 
 - Improve review extraction reliability.
-- Enhance suspicious review detection with more contextual signals.
 - Improve sentiment analysis quality and evidence consistency.
 - Add configurable backend deployment settings.
 - Expand automated testing and integration coverage.
 
 - 提升評論擷取的穩定性。
-- 加入更多上下文特徵，改善可疑評論辨識。
 - 提升情感分析品質及證據一致性。
 - 增加可配置的 Backend 部署設定。
 - 擴充自動化測試與整合測試。

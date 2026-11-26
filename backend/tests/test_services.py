@@ -78,6 +78,8 @@ def test_llm_mock_and_evidence_validation(monkeypatch):
     out = analyze_reviews(rows)
     assert out.pros[0].evidence_review_ids == ["real"]
     bad = LLMABSAOutput(
+        decision_pros="",
+        decision_cons="",
         pros=[
             ReviewAnalysis(
                 aspect="x",

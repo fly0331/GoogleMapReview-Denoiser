@@ -21,24 +21,39 @@ export interface ReviewAnalysis {
   evidence_review_ids: string[];
 }
 
-export interface TimelineBucket {
-  month: string;
-  review_count: number;
-  negative_count: number;
-  negative_ratio: number;
+export interface RecommendedDish {
+  name: string;
+  summary: string;
+  evidence_review_ids: string[];
+}
+
+export type VisitInformationCategory =
+  | "budget"
+  | "wait_time"
+  | "reservation"
+  | "parking"
+  | "dining_time_limit"
+  | "payment"
+  | "other";
+
+export interface PracticalVisitInformation {
+  category: VisitInformationCategory;
+  summary: string;
+  evidence_review_ids: string[];
 }
 
 export interface AnalyzeResponse {
   cache_hit: boolean;
   analysis_mode: "mock" | "gemini";
+  model_id?: string | null;
   analyzed_count: number;
-  metrics: Record<string, number | null>;
-  anomaly_alert: boolean;
-  timeline: TimelineBucket[];
   aspect_scores: Record<string, number>;
+  decision_pros: string;
+  decision_cons: string;
   pros: ReviewAnalysis[];
   cons: ReviewAnalysis[];
-  suspicious_reasons_breakdown: Record<string, number>;
+  recommended_dishes: RecommendedDish[];
+  practical_visit_information: PracticalVisitInformation[];
 }
 
 export interface ApiErrorDetail {
