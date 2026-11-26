@@ -1,5 +1,5 @@
 import os
-
+import ipaddress
 from fastapi import FastAPI, Request, HTTPException
 from app.rate_limit import InMemoryRateLimiter
 from fastapi.responses import JSONResponse
@@ -25,6 +25,19 @@ rate_limiter = InMemoryRateLimiter(
     window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
 )
 
+def get_client_ip(request: Request) -> str:
+    forwarded_ip = request.headers.get("cf-connecting-ip")
+
+    if forwarded_ip:
+        try:
+            return str(ipaddress.ip_address(forwarded_ip.strip()))
+        except ValueError:
+            pass
+
+    if request.client:
+        return request.client.host
+
+    return "unknown"
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -32,11 +45,7 @@ async def rate_limit_middleware(request: Request, call_next):
         request.method == "POST"
         and request.url.path == "/api/v1/analyze"
     ):
-        client_ip = (
-            request.client.host
-            if request.client
-            else "unknown"
-        )
+        client_ip = get_client_ip(request)
 
         if not rate_limiter.is_allowed(client_ip):
             return JSONResponse(

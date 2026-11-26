@@ -1,7 +1,7 @@
 
 from app.rate_limit import InMemoryRateLimiter
 from app.core.schemas import LLMABSAOutput
-
+from starlette.requests import Request
 
 def test_allows_requests_within_limit():
     limiter = InMemoryRateLimiter(max_requests=3, window_seconds=60)
@@ -75,3 +75,45 @@ def test_analyze_endpoint_returns_429_when_limit_exceeded(
     assert first.status_code == 200
     assert second.status_code == 429
     assert second.json()["detail"]["code"] == "RATE_LIMIT_EXCEEDED"
+
+def test_get_client_ip_uses_cf_connecting_ip():
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": [
+            (b"cf-connecting-ip", b"203.0.113.10"),
+        ],
+        "client": ("10.0.0.1", 1234),
+    })
+
+    assert main.get_client_ip(request) == "203.0.113.10"
+
+
+def test_get_client_ip_falls_back_when_header_is_invalid():
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": [
+            (b"cf-connecting-ip", b"invalid-ip"),
+        ],
+        "client": ("10.0.0.1", 1234),
+    })
+
+    assert main.get_client_ip(request) == "10.0.0.1"
+    
+def test_expired_client_entries_are_cleaned_up():
+    limiter = type(main.rate_limiter)(
+        max_requests=10,
+        window_seconds=0,
+    )
+
+    for i in range(99):
+        limiter.is_allowed(f"client-{i}")
+
+    assert len(limiter.requests) == 99
+
+    limiter.is_allowed("trigger-cleanup")
+
+    assert list(limiter.requests.keys()) == ["trigger-cleanup"]
