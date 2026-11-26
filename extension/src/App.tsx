@@ -1,26 +1,21 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AnalyzeRequest,
   AnalyzeResponse,
   PracticalVisitInformation,
   VisitInformationCategory,
 } from "./types";
-import { analyzeReviews } from "./api";
+import { taskKey, type AnalysisTask, type StartAnalysisRequest, type StartAnalysisResponse } from "./analysis-task";
+import { getMapsPlaceId, mapsDebugEnabled } from "./maps-context";
 
-interface CollectionResult {
-  place_id: string;
-  scraped_at: string;
-  reviews: AnalyzeRequest["reviews"];
-}
-
-interface CollectionMessage {
-  success: boolean;
-  data?: CollectionResult;
-  error?: string;
-}
-
-type AnalysisStatus = "idle" | "collecting" | "analyzing" | "done";
+const taskStatus: Record<AnalysisTask["phase"], string> = {
+  opening_reviews: "正在開啟評論",
+  collecting: "正在擷取評論",
+  analyzing: "正在分析評論",
+  done: "分析完成",
+  failed: "分析失敗",
+};
 
 function formatReviewDate(
   reviewDate: string | null,
@@ -333,62 +328,81 @@ function SectionHeading({
 }
 
 export default function App() {
-  const [status, setStatus] = useState<AnalysisStatus>("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
-  const [reviews, setReviews] = useState<AnalyzeRequest["reviews"]>([]);
+  const [task, setTask] = useState<AnalysisTask>();
+  const [error, setError] = useState<string>();
+  const [starting, setStarting] = useState(false);
+  const result = task?.result;
+  const reviews = task?.reviews ?? [];
+  const isLoading = starting || (task && task.phase !== "done" && task.phase !== "failed");
 
-  const isLoading = status === "collecting" || status === "analyzing";
+  useEffect(() => {
+    let live = true;
+    let revision = 0;
+    let currentTabId: number | undefined;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    async function refresh() {
+      const requested = ++revision;
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!live || requested !== revision) return;
+        currentTabId = tab?.id;
+        const latest = currentTabId === undefined ? undefined
+          : await chrome.runtime.sendMessage<{ type: string; tabId: number }, AnalysisTask | undefined>({
+            type: "GET_ANALYSIS_STATE", tabId: currentTabId,
+          });
+        if (live && requested === revision) {
+          clearTimeout(deadlineTimer);
+          setTask(latest);
+          // Reconcile a task once after its deadline if Chrome stopped the worker mid-request.
+          if (latest && latest.phase !== "done" && latest.phase !== "failed") {
+            const delay = latest.deadlineAt + 2000 - Date.now();
+            if (delay > 0) deadlineTimer = setTimeout(() => void refresh(), delay);
+          }
+        }
+      } catch {
+        if (live && requested === revision) setTask(undefined);
+      }
+    }
+
+    const onActivated = () => { setTask(undefined); setError(undefined); void refresh(); };
+    const onUpdated: Parameters<typeof chrome.tabs.onUpdated.addListener>[0] = (tabId, change) => {
+      if (tabId === currentTabId && (change.url || change.status === "loading")) void refresh();
+    };
+    const onStorage: Parameters<typeof chrome.storage.onChanged.addListener>[0] = (changes, area) => {
+      if (area === "session" && (currentTabId === undefined || taskKey(currentTabId) in changes)) void refresh();
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.storage.onChanged.addListener(onStorage);
+    void refresh();
+    return () => {
+      live = false;
+      clearTimeout(deadlineTimer);
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.storage.onChanged.removeListener(onStorage);
+    };
+  }, []);
 
   async function handleAnalyze() {
-    setError(null);
-    setResult(null);
-    setReviews([]);
-
+    setError(undefined);
+    setStarting(true);
     try {
-      setStatus("collecting");
-
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const placeId = tab?.url && getMapsPlaceId(tab.url);
+      if (tab?.id === undefined || !placeId) {
+        setError("請先開啟支援的 Google Maps 地標頁面。");
+        return;
+      }
+      const response = await chrome.runtime.sendMessage<StartAnalysisRequest, StartAnalysisResponse | undefined>({
+        type: "START_FROM_PANEL", tabId: tab.id, placeId, debug: mapsDebugEnabled(),
       });
-
-      if (!tab?.id || !tab.url?.includes("google.com/maps")) {
-        throw new Error("請先開啟 Google Maps 商家頁面。");
-      }
-
-      const response = (await chrome.tabs.sendMessage(tab.id, {
-        type: "COLLECT_REVIEWS",
-      })) as CollectionMessage;
-
-      if (!response.success || !response.data) {
-        throw new Error(response.error || "無法擷取評論。");
-      }
-
-      const collection = response.data;
-
-      if (collection.reviews.length === 0) {
-        throw new Error("沒有找到可分析的評論。");
-      }
-
-      setReviews(collection.reviews);
-      setStatus("analyzing");
-
-      const request: AnalyzeRequest = {
-        place_id: collection.place_id,
-        scraped_at: collection.scraped_at,
-        reviews: collection.reviews,
-      };
-
-      const analysis = await analyzeReviews(request);
-
-      setResult(analysis);
-      setStatus("done");
-    } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "分析過程發生未知錯誤。"
-      );
-      setStatus("idle");
+      if (response?.ok === false) setError("地標已變更，請重新分析。");
+      else if (!response) setError("無法啟動分析，請再試一次。");
+    } catch {
+      setError("無法啟動分析，請再試一次。");
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -443,7 +457,7 @@ export default function App() {
         <h2 className="font-medium">分析商家評論</h2>
 
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          開啟 Google Maps 商家頁面，擷取最多 50 則評論並進行分析。
+          請在 Google Maps 選取地標，再點擊下方按鈕。
         </p>
 
         <button
@@ -452,24 +466,19 @@ export default function App() {
           onClick={handleAnalyze}
           type="button"
         >
-          {status === "collecting"
-            ? "正在擷取評論..."
-            : status === "analyzing"
-              ? "正在分析評論..."
-              : "分析目前商家"}
+          AI 消費分析
         </button>
 
-        {isLoading && (
-          <p className="mt-3 text-center text-xs text-blue-700">
-            {status === "collecting"
-              ? "正在讀取 Google Maps 評論，請稍候。"
-              : "評論已擷取，正在進行分析。"}
+        {task && (
+          <p role="status" className="mt-3 text-sm text-blue-700">
+            {taskStatus[task.phase]}
+            {task.newest === false && task.phase !== "failed" && "，採用目前評論順序。"}
           </p>
         )}
 
-        {error && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
+        {(task?.error || error) && (
+          <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {task?.error || error}
           </div>
         )}
       </section>

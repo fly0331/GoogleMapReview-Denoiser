@@ -11,9 +11,13 @@ const ANALYZE_ENDPOINT = `${API_BASE_URL}/api/v1/analyze`;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 export async function analyzeReviews(
-    request: AnalyzeRequest
+    request: AnalyzeRequest,
+    signal?: AbortSignal,
 ): Promise<AnalyzeResponse> {
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) cancel();
 
     const timeoutId = setTimeout(
         () => controller.abort(),
@@ -67,5 +71,6 @@ export async function analyzeReviews(
         throw error;
     } finally {
         clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", cancel);
     }
 }
