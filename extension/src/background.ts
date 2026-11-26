@@ -4,6 +4,10 @@ import {
 } from "./analysis-task";
 import { getMapsPlaceId, logReviewTrace } from "./maps-context";
 
+chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch(console.error);
+
 interface ActiveTask {
   snapshot: AnalysisTask;
   abort: AbortController;
@@ -37,6 +41,7 @@ function cancel(tabId: number, task: ActiveTask, errorCode: "PLACE_ID_MISMATCH" 
 async function run(task: ActiveTask) {
   const { tabId, requestId, placeId } = task.snapshot;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let errorCode: string | undefined;
   try {
     await publish(task);
     if (task.abort.signal.aborted) return;
@@ -58,9 +63,18 @@ async function run(task: ActiveTask) {
       requestId, expectedPlaceId: placeId, ok: response?.ok,
       errorCode: response?.ok === false ? response.errorCode : undefined,
     });
-    if (!response?.ok) throw new Error(response?.error || "無法連接 Google Maps，請重新整理地標頁。");
-    if (response.data.place_id !== placeId) throw new Error("地標已變更，請重新分析。");
+    if (!response?.ok) {
+      errorCode = response?.errorCode;
+      throw new Error(response?.error || "無法連接 Google Maps，請重新整理地標頁。");
+    }
+    if (response.data.place_id !== placeId) {
+      errorCode = "PLACE_ID_MISMATCH";
+      throw new Error("地標已變更，請重新分析。");
+    }
+    const verifiedTitle = task.snapshot.verifiedTitle ?? response.verifiedTitle?.trim();
+    if (verifiedTitle) task.snapshot = { ...task.snapshot, verifiedTitle };
     if (!response.data.reviews.some((review) => review.text.trim())) {
+      errorCode = "NO_REVIEWS";
       throw new Error("目前沒有可分析的文字評論。");
     }
 
@@ -82,6 +96,7 @@ async function run(task: ActiveTask) {
     await publish(task, {
       phase: "failed",
       error: error instanceof Error ? error.message : "分析失敗，請再試一次。",
+      errorCode,
     });
   } finally {
     clearTimeout(timer);
@@ -134,7 +149,7 @@ function invalidatePlace(tabId: number, nextPlace: string | null) {
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, reply) => {
   if (sender.id !== chrome.runtime.id || typeof message !== "object" || message === null) return;
-  const request = message as { type?: string; placeId?: string; requestId?: string; tabId?: number; debug?: boolean };
+  const request = message as { type?: string; placeId?: string; requestId?: string; tabId?: number; debug?: boolean; verifiedTitle?: unknown };
 
   if (request.type === "GET_ANALYSIS_STATE" || request.type === "START_FROM_PANEL") {
     if (sender.tab || sender.url?.split(/[?#]/u, 1)[0] !== chrome.runtime.getURL("index.html") ||
@@ -168,7 +183,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, reply) => {
     if (!task) return;
     if (request.type === "COLLECTION_STARTED" && placeId === task.snapshot.placeId &&
         request.requestId === task.snapshot.requestId && task.snapshot.phase === "opening_reviews") {
-      void publish(task, { phase: "collecting" })?.catch(console.error);
+      const verifiedTitle = typeof request.verifiedTitle === "string" ? request.verifiedTitle.trim() : "";
+      void publish(task, { phase: "collecting", ...(verifiedTitle && { verifiedTitle }) })?.catch(console.error);
     }
     return;
   }

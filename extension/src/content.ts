@@ -6,7 +6,7 @@ import {
     findBoundReviewAnchor, findPlaceAnchor, findTablessReviewMain, getMapsPlaceId, isVisible, logReviewTrace, mapsDebugEnabled,
     type AnchorDiagnostics, type PlaceAnchor,
 } from "./maps-context";
-import type { CollectionRequest, CollectionResponse } from "./analysis-task";
+import type { CollectionRequest, CollectionResponse, CollectionStarted } from "./analysis-task";
 
 interface ReviewData {
     review_id: string;
@@ -444,9 +444,9 @@ async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal
     ensureRequestedPlace();
     const newest = await tryNewest(initialBinding.pane, ensureRequestedPlace, signal);
     const binding = await waitForBinding("after_sort", 3000);
-    void chrome.runtime.sendMessage({ type: "COLLECTION_STARTED", requestId }).catch(() => {});
+    void chrome.runtime.sendMessage({ type: "COLLECTION_STARTED", requestId, verifiedTitle } satisfies CollectionStarted).catch(() => {});
     const data = await collectReviews(placeId, binding, () => waitForBinding("collecting", 3000), signal);
-    return { ok: true, data, newest };
+    return { ok: true, data, newest, verifiedTitle };
 }
 
 let current: { requestId: string; placeId: string; controller: AbortController } | undefined;

@@ -1,8 +1,12 @@
-# AI Consumer Decision Assistant
+# Lumora for Google Maps
 
-A Chrome Extension that turns Google Maps reviews into a concise decision brief, practical visit information, recommended dishes, and aspect analysis with traceable review evidence.
+**A brighter way to choose.**
 
-將 Google Maps 評論整理為消費決策摘要、消費實用資訊、推薦餐點與可溯源的面向分析，方便在到訪前比較。
+Lumora is a Chrome Extension that turns Google Maps reviews into a concise decision brief, practical visit information, recommended dishes, and aspect analysis with traceable review evidence.
+
+**AI 消費決策助手｜讓每一次消費，都有更清晰的選擇。**
+
+Lumora 將 Google Maps 評論整理為消費決策摘要、消費實用資訊、推薦餐點與可溯源的面向分析，方便在到訪前比較。
 
 ## Features | 核心功能
 

@@ -20,10 +20,12 @@ export interface AnalysisTask {
   placeId: string;
   phase: AnalysisPhase;
   deadlineAt: number;
+  verifiedTitle?: string;
   newest?: boolean;
   result?: AnalyzeResponse;
   reviews?: AnalyzeRequest["reviews"];
   error?: string;
+  errorCode?: string;
 }
 
 export interface CollectionRequest {
@@ -34,5 +36,11 @@ export interface CollectionRequest {
 }
 
 export type CollectionResponse =
-  | { ok: true; data: AnalyzeRequest; newest: boolean }
+  | { ok: true; data: AnalyzeRequest; newest: boolean; verifiedTitle?: string }
   | { ok: false; error: string; errorCode?: string };
+
+export interface CollectionStarted {
+  type: "COLLECTION_STARTED";
+  requestId: string;
+  verifiedTitle: string;
+}

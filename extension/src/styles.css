@@ -2,8 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  min-width: 320px;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+@layer base {
+  body {
+    @apply bg-lumora-cloud text-lumora-midnight;
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+
+  button:focus-visible,
+  summary:focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-lumora-action;
+  }
 }

@@ -354,6 +354,7 @@ test("opens reviews, collects at most 50 cards and reports an unverified sort", 
   assert.equal(response.ok, true, response.error);
   assert.equal(page.reviewTabClicks(), 1);
   assert.equal(response.data.place_id, placeId);
+  assert.equal(response.verifiedTitle, title);
   assert.equal(response.data.reviews.length, 50);
   assert.equal(response.newest, false);
   assert.deepEqual(page.messages, ["COLLECTION_STARTED"]);

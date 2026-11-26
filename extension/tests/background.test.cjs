@@ -25,6 +25,7 @@ function setup(initialUrl = placeUrl) {
   let collection = deferred();
   let analysis = deferred();
   const events = [];
+  const panelBehaviors = [];
   const logs = [];
   const collectionRequests = [];
   const tab = { id: 7, url: initialUrl };
@@ -38,6 +39,9 @@ function setup(initialUrl = placeUrl) {
     console: { ...console, debug: (...args) => logs.push(args) },
     crypto: { randomUUID: () => "request-" + ++sequence },
     chrome: {
+      sidePanel: {
+        setPanelBehavior: async (behavior) => { panelBehaviors.push({ ...behavior }); },
+      },
       runtime: {
         id: "extension", getURL: () => panelUrl,
         onMessage: { addListener: (fn) => { receive = fn; } },
@@ -82,7 +86,7 @@ function setup(initialUrl = placeUrl) {
   const snapshot = () => sendFromPanel({ type: "GET_ANALYSIS_STATE", tabId: 7 });
   const start = (options = {}) => sendFromPanel({ type: "START_FROM_PANEL", tabId: 7, placeId, ...options });
   return {
-    events, values, start, snapshot, logs, collectionRequests, tab, sendFromPanel,
+    events, panelBehaviors, values, start, snapshot, logs, collectionRequests, tab, sendFromPanel,
     sendFromMaps: (type) => receive({ type, tabId: tab.id, placeId }, { ...contentSender, url: tab.url }, assert.fail),
     deferTabRead: () => { pendingTabRead = deferred(); return pendingTabRead; },
     restart: () => { scope.require("./background"); },
@@ -90,7 +94,8 @@ function setup(initialUrl = placeUrl) {
     get analysis() { return analysis; },
     resetResponses: () => { collection = deferred(); analysis = deferred(); },
     signal: () => signal,
-    collecting: () => receive({ type: "COLLECTION_STARTED", requestId: "request-1" }, { ...contentSender, url: tab.url }),
+    collecting: (requestId = "request-1", verifiedTitle, url = tab.url) =>
+      receive({ type: "COLLECTION_STARTED", requestId, verifiedTitle }, { ...contentSender, url }),
     samePlaceLoading: () => {
       update(tab.id, { status: "loading" });
       update(tab.id, { status: "loading", url: tab.url });
@@ -104,6 +109,13 @@ function setup(initialUrl = placeUrl) {
 
 const reviews = [{ review_id: "r1", rating: 5, text: "Helpful and friendly" }];
 const collectionResponse = { ok: true, newest: false, data: { place_id: placeId, reviews } };
+
+test("initializes native toolbar opening without starting an analysis", async () => {
+  const worker = setup();
+  assert.deepEqual(worker.panelBehaviors, [{ openPanelOnActionClick: true }]);
+  assert.equal(await worker.snapshot(), undefined);
+  assert.deepEqual(worker.events, []);
+});
 
 test("a panel click starts one task, deduplicates subsequent clicks and restores the completed result", async () => {
   const worker = setup();
@@ -141,6 +153,66 @@ test("navigation aborts an ongoing POST and rejects the late result", async () =
   assert.equal(await worker.snapshot(), undefined);
   assert.equal(worker.values[key], undefined);
   assert.deepEqual(worker.events, ["COLLECT_FOR_ANALYSIS", "POST", "CANCEL_COLLECTION"]);
+});
+
+test("restores a verified title when the panel reopens during analysis and after completion", async () => {
+  const worker = setup();
+  await worker.start();
+  const requestId = worker.collectionRequests[0].requestId;
+  worker.collecting(requestId, "同名餐廳");
+  const collecting = await worker.snapshot();
+  assert.equal(collecting.phase, "collecting");
+  assert.equal(collecting.requestId, requestId);
+  assert.equal(collecting.tabId, 7);
+  assert.equal(collecting.placeId, placeId);
+  assert.equal(collecting.verifiedTitle, "同名餐廳");
+  worker.collection.resolve({ ...collectionResponse, verifiedTitle: "同名餐廳" });
+  await flush();
+  assert.equal((await worker.snapshot()).verifiedTitle, "同名餐廳");
+  worker.analysis.resolve({ model_id: "fixture" });
+  await flush();
+  assert.equal((await worker.snapshot()).verifiedTitle, "同名餐廳");
+});
+
+test("ignores late collection messages and replies across same-name merchants", async () => {
+  const worker = setup();
+  const nextPlace = "0x3:0x4";
+  await worker.start();
+  const firstRequest = worker.collectionRequests[0].requestId;
+  const firstCollection = worker.collection;
+  worker.collecting(firstRequest, "同名餐廳");
+  worker.navigate(nextPlace);
+  worker.resetResponses();
+  await worker.start({ placeId: nextPlace });
+  const nextRequest = worker.collectionRequests[1].requestId;
+  worker.collecting(firstRequest, "過期名稱");
+  worker.collecting(nextRequest, "錯誤分頁位置", placeUrl);
+  assert.equal((await worker.snapshot()).verifiedTitle, undefined);
+  assert.equal((await worker.snapshot()).phase, "opening_reviews");
+  worker.collecting(nextRequest, "同名餐廳");
+  firstCollection.resolve({ ...collectionResponse, verifiedTitle: "過期名稱" });
+  await flush();
+  const current = await worker.snapshot();
+  assert.equal(current.placeId, nextPlace);
+  assert.equal(current.requestId, nextRequest);
+  assert.equal(current.verifiedTitle, "同名餐廳");
+  assert.ok(!worker.events.includes("POST"));
+  worker.collection.resolve({ ...collectionResponse, data: { place_id: nextPlace, reviews } });
+  await flush();
+  worker.analysis.resolve({ model_id: "second-merchant" });
+  await flush();
+  assert.equal((await worker.snapshot()).result.model_id, "second-merchant");
+  worker.navigate(placeId);
+  assert.equal(await worker.snapshot(), undefined);
+});
+
+test("can restore a completed session snapshot created before verifiedTitle", async () => {
+  const worker = setup();
+  worker.values[key] = { tabId: 7, placeId, requestId: "legacy", phase: "done", result: { model_id: "legacy" } };
+  const restored = await worker.snapshot();
+  assert.equal(restored.phase, "done");
+  assert.equal(restored.verifiedTitle, undefined);
+  assert.equal(restored.result.model_id, "legacy");
 });
 
 test("keeps the existing task across same-place loading events and submits exactly once", async () => {
@@ -303,13 +375,17 @@ test("the panel button starts analysis and a reopened panel restores and refresh
   let storageChanged;
   let cleanup;
   let click;
+  let tabUpdated;
+  let mounted = false;
+  let panelState;
+  let actions;
   const source = fs.readFileSync(path.join(__dirname, "../src/App.tsx"), "utf8");
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
 
   const render = (tag, props) => {
-    if (tag === "button" && props.children === "AI 消費分析") click = props.onClick;
+    if (tag === "button") click = props.disabled ? undefined : props.onClick;
     return null;
   };
   const scope = {
@@ -317,7 +393,10 @@ test("the panel button starts analysis and a reopened panel restores and refresh
     chrome: {
       tabs: {
         query: async () => [worker.tab],
-        onActivated: noopEvent, onUpdated: noopEvent,
+        onActivated: noopEvent, onUpdated: {
+          addListener: (listener) => { tabUpdated = listener; },
+          removeListener: () => { tabUpdated = undefined; },
+        },
       },
       storage: { onChanged: {
         addListener: (listener) => { storageChanged = listener; },
@@ -327,8 +406,22 @@ test("the panel button starts analysis and a reopened panel restores and refresh
     },
     require(name) {
       if (name === "react") return {
-        useState: (initial) => [initial, (value) => stateUpdates.push(value)],
-        useEffect: (effect) => { cleanup = effect(); },
+        useState: (initial) => [panelState ?? initial, (value) => {
+          panelState = value;
+          stateUpdates.push(value);
+        }],
+        useRef: () => actions ??= { current: undefined },
+        useEffect: (effect) => {
+          if (mounted) return;
+          mounted = true;
+          const dispose = effect();
+          cleanup = () => {
+            dispose();
+            mounted = false;
+            panelState = undefined;
+            actions = undefined;
+          };
+        },
       };
       if (name === "react/jsx-runtime") return { jsx: render, jsxs: render };
       const source = fs.readFileSync(path.join(__dirname, "../src", name + ".ts"), "utf8");
@@ -343,34 +436,47 @@ test("the panel button starts analysis and a reopened panel restores and refresh
   scope.exports.default();
   await flush();
   assert.deepEqual(worker.events, []);
-  await click();
+  scope.exports.default();
+  click();
+  await flush();
   assert.equal((await worker.snapshot()).phase, "opening_reviews");
-  worker.collection.resolve(collectionResponse);
+  worker.collection.resolve({ ...collectionResponse, verifiedTitle: "原商家" });
   await flush();
   assert.equal((await worker.snapshot()).phase, "analyzing");
   cleanup();
   assert.equal(storageChanged, undefined);
   assert.equal(worker.signal().aborted, false);
+  scope.exports.default();
+  await flush();
+  assert.equal(panelState.task.phase, "analyzing");
+  assert.equal(panelState.task.verifiedTitle, "原商家");
+  cleanup();
   worker.analysis.resolve({ model_id: "first" });
   await flush();
   assert.equal((await worker.snapshot()).phase, "done");
 
   scope.exports.default();
   await flush();
-  assert.equal(stateUpdates.at(-1).result.model_id, "first");
+  assert.equal(stateUpdates.at(-1).task.result.model_id, "first");
   assert.deepEqual(worker.events, ["COLLECT_FOR_ANALYSIS", "POST"]);
 
   const secondPlace = "0x3:0x4";
   worker.navigate(secondPlace);
+  tabUpdated(worker.tab.id, { url: worker.tab.url });
+  assert.equal(panelState.kind, "checking");
+  assert.equal(panelState.task, undefined);
   worker.resetResponses();
-  await click();
+  await flush();
+  scope.exports.default();
+  click();
+  await flush();
   worker.collection.resolve({ ...collectionResponse, data: { ...collectionResponse.data, place_id: secondPlace } });
   await flush();
   worker.analysis.resolve({ model_id: "second" });
   await flush();
   storageChanged({ [key]: { newValue: worker.values[key] } }, "session");
   await flush();
-  assert.equal(stateUpdates.at(-1).result.model_id, "second");
+  assert.equal(stateUpdates.at(-1).task.result.model_id, "second");
   assert.deepEqual(worker.events, ["COLLECT_FOR_ANALYSIS", "POST", "COLLECT_FOR_ANALYSIS", "POST"]);
   cleanup();
 });

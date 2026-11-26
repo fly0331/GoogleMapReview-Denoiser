@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-26T17:50:30.985Z",
+  "title": "Design System: Lumora for Google Maps",
+  "extensions": {
+    "motion": [
+      {
+        "name": "analysis-spinner",
+        "value": "spin 1s linear infinite",
+        "purpose": "分析進行中，僅在允許動態效果時顯示"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "panel-280",
+        "value": "280px"
+      },
+      {
+        "name": "panel-360",
+        "value": "360px"
+      },
+      {
+        "name": "panel-480",
+        "value": "480px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主要分析按鈕",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "全寬分析操作，呈現停用與鍵盤焦點",
+      "html": "<button class=\"ds-primary\" type=\"button\">AI 消費分析</button>",
+      "css": ".ds-primary{width:100%;border:0;border-radius:8px;background:#7C3AED;color:#fff;padding:10px 16px;font:600 14px/20px Inter,ui-sans-serif,system-ui,sans-serif;cursor:pointer;transition:background-color 150ms}.ds-primary:hover{background:rgb(124 58 237 / 90%)}.ds-primary:disabled{color:#7C3AED;background:rgb(124 58 237 / 10%);cursor:not-allowed}.ds-primary:focus-visible{outline:2px solid #7C3AED;outline-offset:2px}"
+    },
+    {
+      "name": "分析模式",
+      "kind": "chip",
+      "description": "以文字標明 Gemini 或 Mock 模式",
+      "html": "<span class=\"ds-mode\">GEMINI MODE</span>",
+      "css": ".ds-mode{display:inline-flex;align-items:center;gap:8px;border:1px solid #a7f3d0;border-radius:9999px;padding:6px 12px;background:#ecfdf5;color:#047857;font:600 12px/16px system-ui}.ds-mode::before{content:'';width:8px;height:8px;border-radius:50%;background:#10b981}"
+    },
+    {
+      "name": "結果區塊",
+      "kind": "card",
+      "refersTo": "result-section",
+      "description": "以單層容器呈現同類資訊",
+      "html": "<section class=\"ds-result\"><h2>消費實用資訊</h2><p>資訊整理自評論，實際價格與店家政策可能有所變動。</p></section>",
+      "css": ".ds-result{border:1px solid #E2E8F0;border-radius:12px;background:#fff;padding:16px;color:#0F172A;font-family:system-ui}.ds-result h2{margin:0;font-size:16px;font-weight:600;line-height:24px}.ds-result p{margin:8px 0 0;color:#64748B;font-size:12px;line-height:20px}"
+    },
+    {
+      "name": "評論證據",
+      "kind": "custom",
+      "description": "在對應觀察下展開原文",
+      "html": "<details class=\"ds-evidence\"><summary>查看原始評論（1）</summary><p>原始評論文字</p></details>",
+      "css": ".ds-evidence{background:#F8FAFC;border-radius:8px;padding:12px;font-family:system-ui}.ds-evidence summary{color:#7C3AED;font-size:12px;font-weight:500;cursor:pointer}.ds-evidence summary:hover{text-decoration:underline}.ds-evidence summary:focus-visible{outline:2px solid #7C3AED;outline-offset:2px}.ds-evidence p{margin:8px 0 0;color:#0F172A;font-size:14px;line-height:24px}"
+    },
+    {
+      "name": "面向評分",
+      "kind": "custom",
+      "description": "文字分數搭配條形呈現",
+      "html": "<div class=\"ds-rating\"><div><span>餐點品質</span><span>4 / 5</span></div><span class=\"ds-rating-track\" aria-hidden=\"true\"><span></span></span></div>",
+      "css": ".ds-rating{color:#0F172A;font:14px/20px system-ui}.ds-rating div{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px}.ds-rating div span:last-child{flex-shrink:0;font-variant-numeric:tabular-nums}.ds-rating-track,.ds-rating-track span{display:block;height:8px;border-radius:9999px}.ds-rating-track{background:#E2E8F0}.ds-rating-track span{width:80%;background:#059669}"
+    }
+  ]
+}
