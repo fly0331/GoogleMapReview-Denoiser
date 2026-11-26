@@ -111,10 +111,33 @@ def validate_evidence_ids(
 
         return filtered
 
+    recommended_dishes = []
+    seen_dishes = set()
+
+    for dish in output.recommended_dishes:
+        evidence_ids = [rid for rid in dish.evidence_review_ids if rid in valid]
+
+        if not evidence_ids:
+            continue
+
+        dish_key = dish.name.strip().casefold()
+        if dish_key in seen_dishes:
+            continue
+
+        seen_dishes.add(dish_key)
+
+        recommended_dishes.append(
+            dish.model_copy(update={"evidence_review_ids": evidence_ids})
+        )
+
+        if len(recommended_dishes) >= 5:
+            break
+
     return output.model_copy(
         update={
             "pros": filter_items(output.pros, "positive"),
             "cons": filter_items(output.cons, "negative"),
+            "recommended_dishes": recommended_dishes,
         }
     )
 
@@ -190,6 +213,18 @@ def _analyze_with_gemini(
 6. 不可捏造評論內容、面向或證據。
 7. aspect_scores 為各面向的整體評分，範圍 1.0 至 5.0。
 8. 沒有足夠證據的面向不要輸出。
+
+推薦餐點分析要求：
+9. 從評論中找出被明確提及、且獲得正面評價的具體餐點。
+10. 只推薦評論中實際出現的餐點名稱，不可自行推測或創造餐點。
+11. 優先推薦在不同評論中多次獲得正面評價的餐點。
+12. 若只有一則評論提供明確的正面餐點證據，仍可列入，但不要將其描述成廣受推薦。
+13. 不可從「食物很好吃」、「餐點不錯」等籠統評論推測具體菜名。
+14. summary 說明該餐點受到推薦的原因，必須能從評論內容找到依據。
+15. 每道餐點都必須附上實際提及該餐點的 review_id。
+16. 最多輸出 5 道餐點，依正面提及的充分程度排序。
+17. 沒有明確餐點證據時，recommended_dishes 回傳空陣列。
+18. 不可捏造餐點價格、食材、份量或其他評論未提及的資訊。
 
 以下是評論資料（JSON）：
 {json.dumps(review_data, ensure_ascii=False)}

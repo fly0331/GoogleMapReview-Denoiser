@@ -164,6 +164,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         anomaly_alert=anomaly,
         timeline=timeline,
         aspect_scores=llm_output.aspect_scores,
+        recommended_dishes=llm_output.recommended_dishes,
         pros=llm_output.pros,
         cons=llm_output.cons,
         suspicious_reasons_breakdown=breakdown,

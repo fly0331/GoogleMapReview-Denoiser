@@ -1,3 +1,4 @@
+
 from typing import Literal
 from datetime import datetime, timezone
 
@@ -63,10 +64,34 @@ class ReviewAnalysis(BaseModel):
         ))
 
 
+class RecommendedDish(BaseModel):
+    name: str
+    summary: str
+    evidence_review_ids: list[str]
+
+    @field_validator("name", "summary")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Field must not be empty")
+        return value
+
+    @field_validator("evidence_review_ids")
+    @classmethod
+    def normalize_evidence_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(
+            rid.strip() for rid in value if rid.strip()
+        ))
+
+
 class LLMABSAOutput(BaseModel):
     pros: list[ReviewAnalysis] = Field(default_factory=list)
     cons: list[ReviewAnalysis] = Field(default_factory=list)
     aspect_scores: dict[str, float] = Field(default_factory=dict)
+    recommended_dishes: list[RecommendedDish] = Field(
+        default_factory=list,
+    )
 
     @field_validator("aspect_scores")
     @classmethod
@@ -110,4 +135,7 @@ class AnalyzeResponse(BaseModel):
     aspect_scores: dict[str, float]
     pros: list[ReviewAnalysis]
     cons: list[ReviewAnalysis]
+    recommended_dishes: list[RecommendedDish] = Field(
+        default_factory=list,
+    )
     suspicious_reasons_breakdown: dict[str, int]

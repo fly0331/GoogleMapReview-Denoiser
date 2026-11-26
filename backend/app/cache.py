@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-CACHE_FORMAT_VERSION = 1
+CACHE_FORMAT_VERSION = 2
 
 
 def create_fingerprint(payload: dict[str, Any]) -> str:

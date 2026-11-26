@@ -43,6 +43,7 @@ def test_mock_provider_returns_pros_and_cons(
         "review-3",
     ]
     assert result.cons[0].evidence_review_ids == ["review-2"]
+    assert result.recommended_dishes == []
 
 
 def test_mock_provider_does_not_call_gemini(
@@ -72,7 +73,7 @@ def test_missing_api_key_raises_error(
 
     with pytest.raises(llm_absa.LLMNotConfiguredError) as exc_info:
         llm_absa.analyze_reviews(reviews)
-        
+
     assert exc_info.value.code == "LLM_NOT_CONFIGURED"
 
 
@@ -125,6 +126,16 @@ def test_gemini_provider_parses_structured_output(
             "food": 4.5,
             "service": 2.0,
         },
+        "recommended_dishes": [
+            {
+                "name": "牛肉麵",
+                "summary": "多則評論提及牛肉麵湯頭濃郁。",
+                "evidence_review_ids": [
+                    "review-1",
+                    "review-3",
+                ],
+            }
+        ],
     }
 
     class FakeInteraction:
@@ -156,6 +167,12 @@ def test_gemini_provider_parses_structured_output(
     assert result.pros[0].evidence_review_ids == ["review-1"]
     assert result.cons[0].evidence_review_ids == ["review-2"]
     assert result.aspect_scores["food"] == 4.5
+    assert len(result.recommended_dishes) == 1
+    assert result.recommended_dishes[0].name == "牛肉麵"
+    assert result.recommended_dishes[0].evidence_review_ids == [
+        "review-1",
+        "review-3",
+    ]
 
 
 def test_invalid_gemini_output_raises_error(
@@ -184,7 +201,7 @@ def test_invalid_gemini_output_raises_error(
 
     with pytest.raises(llm_absa.LLMInvalidResponseError) as exc_info:
         llm_absa.analyze_reviews(reviews)
-        
+
     assert exc_info.value.code == "LLM_INVALID_RESPONSE"
 
 
@@ -328,7 +345,8 @@ def test_evidence_ids_are_normalized():
     )
 
     assert output.pros[0].evidence_review_ids == ["review-1"]
-    
+
+
 def test_gemini_timeout_raises_timeout_error(
     reviews,
     monkeypatch,
@@ -377,13 +395,12 @@ def test_gemini_service_error_raises_unavailable_error(
         FakeClient,
     )
 
-    with pytest.raises(
-        llm_absa.LLMServiceUnavailableError
-    ) as exc_info:
+    with pytest.raises(llm_absa.LLMServiceUnavailableError) as exc_info:
         llm_absa.analyze_reviews(reviews)
 
     assert exc_info.value.code == "LLM_SERVICE_UNAVAILABLE"
-    
+
+
 @pytest.mark.parametrize(
     "reviews",
     [
@@ -454,3 +471,128 @@ def test_empty_gemini_response_raises_invalid_response(
         llm_absa.analyze_reviews(reviews)
 
     assert exc_info.value.code == "LLM_INVALID_RESPONSE"
+
+
+
+def test_invalid_recommended_dish_evidence_is_removed(reviews):
+    output = LLMABSAOutput(
+        recommended_dishes=[
+            {
+                "name": "牛肉麵",
+                "summary": "湯頭濃郁",
+                "evidence_review_ids": ["invalid-id"],
+            },
+            {
+                "name": "滷肉飯",
+                "summary": "口味不錯",
+                "evidence_review_ids": ["review-1"],
+            },
+            {
+                "name": "雞湯",
+                "summary": "湯頭鮮甜",
+                "evidence_review_ids": [],
+            },
+        ]
+    )
+
+    result = llm_absa.validate_evidence_ids(output, reviews)
+
+    assert len(result.recommended_dishes) == 1
+    assert result.recommended_dishes[0].name == "滷肉飯"
+
+def test_duplicate_recommended_dishes_are_removed(reviews):
+    output = LLMABSAOutput(
+        recommended_dishes=[
+            {
+                "name": "牛肉麵",
+                "summary": "湯頭濃郁",
+                "evidence_review_ids": ["review-1"],
+            },
+            {
+                "name": " 牛肉麵 ",
+                "summary": "牛肉口感不錯",
+                "evidence_review_ids": ["review-3"],
+            },
+            {
+                "name": "滷肉飯",
+                "summary": "米飯香氣十足",
+                "evidence_review_ids": ["review-1"],
+            },
+        ]
+    )
+
+    result = llm_absa.validate_evidence_ids(output, reviews)
+
+    assert len(result.recommended_dishes) == 2
+    assert result.recommended_dishes[0].name == "牛肉麵"
+    assert result.recommended_dishes[1].name == "滷肉飯"
+
+def test_recommended_dishes_are_limited_to_five(reviews):
+    output = LLMABSAOutput(
+        recommended_dishes=[
+            {
+                "name": f"餐點{i}",
+                "summary": f"推薦理由{i}",
+                "evidence_review_ids": ["review-1"],
+            }
+            for i in range(7)
+        ]
+    )
+
+    result = llm_absa.validate_evidence_ids(output, reviews)
+
+    assert len(result.recommended_dishes) == 5
+    assert [
+        dish.name for dish in result.recommended_dishes
+    ] == [
+        "餐點0",
+        "餐點1",
+        "餐點2",
+        "餐點3",
+        "餐點4",
+    ]
+
+def test_recommended_dish_evidence_ids_are_normalized():
+    output = LLMABSAOutput(
+        recommended_dishes=[
+            {
+                "name": "牛肉麵",
+                "summary": "湯頭濃郁",
+                "evidence_review_ids": [
+                    "review-1",
+                    "review-1",
+                    " ",
+                ],
+            }
+        ]
+    )
+
+    assert output.recommended_dishes[0].evidence_review_ids == [
+        "review-1"
+    ]
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "name": "",
+            "summary": "湯頭濃郁",
+            "evidence_review_ids": ["review-1"],
+        },
+        {
+            "name": "牛肉麵",
+            "summary": "   ",
+            "evidence_review_ids": ["review-1"],
+        },
+    ],
+)
+def test_invalid_recommended_dish_is_rejected(payload):
+    with pytest.raises(ValidationError):
+        LLMABSAOutput(recommended_dishes=[payload])
+
+def test_empty_reviews_return_empty_recommended_dishes(monkeypatch):
+    monkeypatch.setenv("MOCK_LLM", "false")
+
+    result = llm_absa.analyze_reviews([])
+
+    assert result.recommended_dishes == []
