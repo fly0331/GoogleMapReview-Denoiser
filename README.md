@@ -9,18 +9,17 @@ AI 消費決策助手｜讓每一次消費，都有更清晰的選擇。
 
 Lumora turns a collection of reviews into a concise decision brief, practical visit information, recommended dishes, and aspect-based analysis. Rather than asking users to read dozens of individual reviews, it organizes the information they need before visiting a business, with original review evidence available for the strengths and weaknesses identified in the analysis.
 
-**Project status:** Portfolio demonstration · Public release pending authorization and production verification.
 
 [Features](#features) · [Architecture](#architecture) · [Engineering](#engineering-highlights) · [Quick start](#quick-start) · [Testing](#testing)
 
 ## Product preview
 
 <p align="center">
-  <img src="docs/assets/welcome.png" alt="Lumora welcome screen" width="150" />
+  <img src="docs/assets/welcome.png" alt="Lumora welcome screen" width="200" />
   &nbsp;&nbsp;
-  <img src="docs/assets/select-merchant.png" alt="Lumora waiting for merchant selection" width="150" />
-  <img src="docs/assets/analysis.png" alt="Lumora waiting for merchant selection" width="150" />
-  <img src="docs/assets/result.png" alt="Lumora waiting for merchant selection" width="150" />
+  <img src="docs/assets/select-merchant.png" alt="Lumora waiting for merchant selection" width="200" />
+  <img src="docs/assets/analysis.png" alt="Lumora waiting for merchant selection" width="200" />
+  <img src="docs/assets/result.png" alt="Lumora waiting for merchant selection" width="200" />
 </p>
 
 
@@ -35,7 +34,7 @@ Lumora turns a collection of reviews into a concise decision brief, practical vi
 | Aspect analysis | Presents aspect scores, strengths, weaknesses, and expandable original review evidence for pros and cons. |
 | Analysis modes | Supports Gemini for model-generated analysis and a deterministic Mock mode for local development without an API key. |
 
-The Chrome side panel displays actual review collection progress and the current analysis stage. Prices, policies, and customer experiences may change; the output is a decision aid rather than a guarantee of current conditions.
+
 
 ## Architecture
 
@@ -47,9 +46,7 @@ flowchart LR
     Backend <--> Gemini[Gemini API]
 ```
 
-The Chrome extension collects reviews and displays analysis in its side panel. FastAPI validates requests, reuses cached results when available, and coordinates Gemini analysis on cache misses. The backend also supports deterministic Mock mode for local development. See [Architecture](docs/ARCHITECTURE.md) for implementation details.
 
-Each analysis uses up to 50 text-bearing reviews within a 20,000-character review-text budget. Structured results and evidence references are validated before being returned to the extension.
 
 ## Engineering highlights
 
