@@ -6,7 +6,7 @@ import type {
   PracticalVisitInformation,
   VisitInformationCategory,
 } from "./types";
-import { taskKey, type AnalysisTask, type StartAnalysisRequest, type StartAnalysisResponse } from "./analysis-task";
+import { REVIEW_COLLECTION_LIMIT, taskKey, type AnalysisTask, type StartAnalysisRequest, type StartAnalysisResponse } from "./analysis-task";
 import { getMapsPlaceId, mapsDebugEnabled } from "./maps-context";
 
 const taskStatus: Record<AnalysisTask["phase"], string> = {
@@ -433,6 +433,23 @@ function describeTaskFailure(task: AnalysisTask): PanelFailure {
   return { message: "這次無法完成分析。請稍後重新分析。", retry: "analysis" };
 }
 
+function ExploreIllustration() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 248 112" className="mb-4 block w-full max-w-[288px]">
+      <rect x="1" y="1" width="246" height="110" rx="12" fill="#F2EEFD" />
+      <g fill="none" stroke="#C4B5FD" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 82l46-29 46 14 48-24 39 8 45-26M18 47l39-24 44 13 40-21m-25 88 47-31 46 10 27-17" />
+        <path d="M35 102l-7-30 17-25-9-27m65 16 3 31-17 33m105-86-1 37 18 31-12 20" />
+      </g>
+      <path d="M61 82c20 7 39 6 59-1l25-9" fill="none" stroke="#7C3AED" strokeWidth="1.5" strokeDasharray="2 5" strokeLinecap="round" />
+      <path d="M74 45c0 13-16 28-16 28S42 58 42 45a16 16 0 1 1 32 0Z" fill="#7C3AED" />
+      <circle cx="58" cy="45" r="5" fill="#FFF" />
+      <path d="M142 29h52a7 7 0 0 1 7 7v25a7 7 0 0 1-7 7h-36l-12 9v-9h-4a7 7 0 0 1-7-7V36a7 7 0 0 1 7-7Z" fill="#FFF" stroke="#7C3AED" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M149 43h37m-37 10h26" fill="none" stroke="#7C3AED" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [panel, setPanel] = useState<PanelState>({ kind: "checking" });
   const actions = useRef<{ analyze: () => Promise<void>; check: () => void }>();
@@ -567,21 +584,72 @@ export default function App() {
 
   return (
     <main className="mx-auto min-h-screen max-w-xl px-4 pb-6 pt-5">
-      <header className="flex items-center gap-2.5 border-b border-lumora-border pb-3">
-        <img src="/icons/lumora.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" />
+      <header className="flex items-center gap-2.5 border-b border-lumora-border pb-2.5">
+        <img src="/icons/lumora.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
         <div className="min-w-0">
-          <h1 className="flex items-baseline gap-1 text-[1.625rem] font-bold leading-7 tracking-[-0.035em] text-lumora-midnight">
-            Lumora
-            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-lumora-violet" />
+          <h1>
+            <img src="/icons/lumora-wordmark.svg" alt="Lumora" width={120} className="block h-auto max-w-full" />
           </h1>
-          <p className="text-xs font-medium leading-4">AI 消費決策助手</p>
-          <p lang="en" className="text-xs leading-4 text-lumora-secondary">A brighter way to choose.</p>
+          <p lang="en" className="mt-0.5 text-xs leading-4 text-lumora-secondary">A brighter way to choose.</p>
         </div>
       </header>
 
-      {!result && (
-        <section className="mt-4 rounded-xl border border-lumora-border bg-white p-4">
-          <h2 className="font-semibold">分析商家評論</h2>
+      {panel.kind === "unsupported" && (
+        <section className="mt-5">
+          <ExploreIllustration />
+          <h2 className="text-xl font-semibold leading-7">探索下一個好選擇。</h2>
+          <p className="mt-2 text-sm leading-6 text-lumora-secondary">
+            在 Google Maps 找到感興趣的商家，讓 Lumora 為你讀懂評論。
+          </p>
+          <a
+            href="https://www.google.com/maps/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 flex min-h-10 items-center justify-between gap-2 rounded-lg bg-lumora-action px-4 py-2.5 text-sm font-semibold text-white hover:bg-lumora-action/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lumora-action"
+          >
+            開啟 Google Maps
+            <LineIcon path="M4 12l8-8M6 4h6v6" />
+          </a>
+          <ul className="mt-5 divide-y divide-lumora-border border-y border-lumora-border text-sm leading-6">
+            <li className="flex items-start gap-2 py-2.5 text-lumora-midnight">
+              <span className="text-lumora-action"><LineIcon path="M4 3h8v10H4zM6 6h4m-4 3h4" /></span>
+              快速掌握評論重點。
+            </li>
+            <li className="flex items-start gap-2 py-2.5 text-lumora-midnight">
+              <span className="text-lumora-action"><LineIcon path="M8 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" /></span>
+              發現值得推薦的餐點。
+            </li>
+            <li className="flex items-start gap-2 py-2.5 text-lumora-midnight">
+              <span className="text-lumora-action"><LineIcon path="M3 5h10v8H3zM5 3v4m6-4v4M3 8h10" /></span>
+              做好消費前的準備。
+            </li>
+          </ul>
+        </section>
+      )}
+
+      {panel.kind === "unselected" && (
+        <section className="mt-5">
+          <h2 className="text-xl font-semibold leading-7">今天想探索哪間店？</h2>
+          <p className="mt-2 text-sm leading-6 text-lumora-secondary">
+            在 Google Maps 搜尋感興趣的商家，並開啟它的商家頁面。選好後，就能在這裡開始分析。
+          </p>
+        </section>
+      )}
+
+      {!result && panel.kind !== "unsupported" && panel.kind !== "unselected" && (
+        <section className={isLoading || panel.kind === "checking"
+          ? "mt-4 rounded-xl border border-lumora-border bg-white p-4"
+          : "mt-5"}>
+          <h2 className={isLoading || panel.kind === "checking" ? "font-semibold" : "text-xl font-semibold leading-7"}>
+            {failure ? "這次分析還沒完成" : panel.kind === "merchant" && !task && !starting
+              ? "看懂評論，再做決定。" : "分析商家評論"}
+          </h2>
+
+          {panel.kind === "merchant" && !task && !starting && !failure && (
+            <p className="mt-2 text-sm leading-6 text-lumora-secondary">
+              Lumora 會擷取最多 {REVIEW_COLLECTION_LIMIT} 則評論，由 AI 整理評論重點、推薦餐點與到訪前可參考的資訊。
+            </p>
+          )}
 
           {(task || starting) && (
             <p className="mt-2 break-words text-sm font-semibold leading-6">
@@ -604,7 +672,7 @@ export default function App() {
           <AnalysisProgress task={task} starting={starting} />
 
           {failure && (
-            <p role="alert" className="mt-3 break-words rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <p role="alert" className="mt-3 break-words rounded-lg bg-red-50 px-3 py-2.5 text-sm leading-6 text-red-800">
               {failure.message}
             </p>
           )}
@@ -616,7 +684,7 @@ export default function App() {
               onClick={() => failure?.retry === "context" ? actions.current?.check() : void actions.current?.analyze()}
               type="button"
             >
-              {failure?.retry === "context" ? "確認商家" : failure || result ? "重新分析" : "AI 消費分析"}
+              {failure?.retry === "context" ? "確認商家" : failure || result ? "重新分析" : isLoading ? "AI 消費分析" : "開始消費分析"}
             </button>
           )}
         </section>

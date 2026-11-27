@@ -32,9 +32,9 @@ Lumora 是 AI 消費決策助手。它將 Google Maps 評論整理為消費決�
 
 ## Brand Commitments
 
-產品名稱為 Lumora for Google Maps，主要語言為繁體中文，英文標語為「A brighter way to choose.」。保留現有 Lumora Logo，來源為 `extension/public/icons/lumora.svg`。
+產品名稱為 Lumora for Google Maps，主要語言為繁體中文，英文標語為「A brighter way to choose.」。品牌符號與字標來源分別為 `extension/public/icons/lumora.svg` 與 `extension/public/icons/lumora-wordmark.svg`。
 
-品牌個性為 Intelligent、Premium、Minimal、Trustworthy、Approachable。文字以清楚的消費語彙、可核對的依據和具體的下一步體現這些特質。
+Editorial Intelligence 品牌個性為 Editorial、Elegant、Intelligent、Minimal、Premium、Consumer-oriented。文字以清楚的消費語彙、可核對的依據和具體的下一步體現這些特質。
 
 ## Evidence on Hand
 
