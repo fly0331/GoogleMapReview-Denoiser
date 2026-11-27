@@ -12,11 +12,8 @@ colors:
   divider: "#E2E8F0"
 typography:
   wordmark:
-    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "1.625rem"
-    fontWeight: 700
-    lineHeight: 1.077
-    letterSpacing: "-0.045em"
+    fontFamily: "Georgia"
+    fontWeight: 400
   section-title:
     fontSize: "1rem"
     fontWeight: 600
@@ -59,11 +56,11 @@ components:
 
 以成熟商業 SaaS 的精準和節制呈現評論分析。清楚的標題、可預期的閱讀順序與精簡的分隔，讓使用者在狹窄側欄快速找到值得推薦、消費前須注意和到訪所需的資訊。
 
-上方 tokens 取自現有側欄。以下使用規則定義後續設計的目標，包含降低容器層級及窄欄驗收。保留 `extension/public/icons/lumora.svg` 的圖形、比例與配色，沿用 Lumora 名稱和英文標語。實作來源為 `extension/src/App.tsx`、`extension/src/styles.css` 與 `extension/tailwind.config.js`。
+品牌採用 Editorial Intelligence 方向，結合精品生活指南的編輯感與清楚易讀的消費資訊。保留 Lumora 名稱與英文標語，將襯線字形集中於字標。實作來源為 `extension/src/App.tsx`、`extension/src/styles.css` 與 `extension/tailwind.config.js`。
 
 ## Colors
 
-- **主色** 使用 Action Violet 標示主要操作、可展開的評論及鍵盤焦點。Brand Violet 用於少量品牌識別，Lavender 用於低強度的背景或提示。
+- **主色** 使用 Action Violet 標示品牌四芒星、主要操作、可展開的評論及鍵盤焦點。Lavender 用於低強度的背景或提示。
 - **中性色** 使用 Midnight Navy 呈現品牌與主要文字，Slate Secondary 用於次要說明，Cloud 作為畫布，白色用於需要分組的內容。Divider 僅用於需要辨識邊界或長列表分項的位置。
 - **語意色** 沿用現有綠、琥珀、紅的狀態語意。評分保留數值和圖例，Gemini／Mock 保留文字標示，失敗保留明確訊息。狀態即使去除色彩也應可理解。
 - 正文、次要文字及互動文字在實際背景上以 4.5:1 對比為驗收目標，焦點指示與關鍵非文字圖形以 3:1 為目標。含透明度的組合須以合成後顏色計算。
@@ -71,7 +68,7 @@ components:
 ## Typography
 
 - 現有字體堆疊以 Inter 起首，由系統 sans-serif 提供回退。繁體中文沿用系統可用字型。
-- 品牌字標是畫面最大文字。區塊標題使用半粗體，項目名稱使用 14px 半粗體，分析與評論正文沿用 14px，長文維持約 24px 行高。12px 用於日期、模式、圖例等附屬資訊。
+- Lumora 字標使用 Georgia Regular 的固定向量輪廓，字距以 −0.0175em 編排，並以共同基線對齊。使用 `extension/public/icons/lumora-wordmark.svg`，呈現寬度 120px、高度依比例縮放。字形由 SVG 路徑提供，介面仍使用 sans-serif。區塊標題與項目名稱使用半粗體，分析與評論正文沿用 14px，長文維持約 24px 行高。12px 用於標語、日期、模式、圖例等附屬資訊。
 - 採繁體中文撰寫介面標題與操作提示。英文保留於標語、產品或模型名稱等有辨識用途的位置。評分與序號採等寬數字，商家名稱、品項、模型 ID 及原文可換行。
 
 ## Layout
@@ -91,7 +88,7 @@ components:
 
 ## Components
 
-- **品牌列** 使用現有 Logo、Lumora 字標、產品描述與標語。側欄現有 Logo 尺寸為 48px。
+- **品牌列** 左側是 40 × 40px 的透明底 Violet 四芒星與白色圓心，右側是 Midnight Navy 字標及低視覺權重的英文標語。符號與文字組垂直置中，間距 10px，底部使用淡色分隔線。Chrome 工具列使用同一星形與圓心，搭配 Midnight Navy 圓角底板。圖示來源位於 `extension/public/icons/`。
 - **分析操作** 「AI 消費分析」是全寬主要按鈕。保留 hover、清楚的鍵盤焦點及進行中停用狀態。沿用文字狀態與錯誤提示，分別透過 `role="status"` 與 `role="alert"` 傳達。載入轉動遵循 reduced-motion 偏好，階段資訊始終以文字提供。
 - **決策摘要與實用資訊** 並列的語意以垂直段落呈現「值得推薦」和「消費前須注意」。實用資訊以類別與內文組成短列，保留價格及政策可能變動的說明。沿用無可驗證資料時省略整區的行為。
 - **推薦餐點** 以序號、名稱和說明形成可快速掃讀的列表。無明確推薦時保留清楚的空狀態。
