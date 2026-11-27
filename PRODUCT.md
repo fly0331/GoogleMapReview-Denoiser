@@ -16,7 +16,7 @@ Lumora 是 AI 消費決策助手。它將 Google Maps 評論整理為消費決�
 
 ## Positioning
 
-在使用者瀏覽 Google Maps 時，於 Chrome 側邊欄提供當前商家的決策資訊。實用資訊可回查對應的評論引句，優缺點也連結至評論證據。
+在使用者瀏覽 Google Maps 時，於 Chrome 側邊欄提供當前商家的決策資訊。實用資訊由後端以評論引句查核，優缺點可從側欄展開對應原文。
 
 ## Operating Context
 
@@ -25,10 +25,11 @@ Lumora 是 AI 消費決策助手。它將 Google Maps 評論整理為消費決�
 ## Capabilities and Constraints
 
 - Chrome 側邊欄須支援 280–480px 寬度，保留現有功能及全部分析結果。
-- 本階段交付設計文件。後續依規範調整側欄時，沿用現有依賴、後端、API 合約、Content Script 及 Background Task Lifecycle。
+- Design Freeze 期間維持既有介面及任務流程。隱私揭露與同意介面另行確認。
 - 實用資訊涵蓋預算、等候時間、訂位、停車、用餐限時及付款方式。個別項目須通過原文引句驗證，無可驗證資料時回傳空陣列。價格及商家政策可能隨時間改變。
 - Gemini 以單次結構化輸出產生各分析區塊，後端驗證證據 ID。以商家 ID 為鍵的分析快取有效期為七天。
 - 支援可重現的 Mock 分析供開發與測試，介面標示目前使用的分析模式。
+- 分析由使用者主動啟動。後端收到評論 ID、星等及正文，以及商家 ID 與擷取時間。商家名稱與相對日期留在瀏覽器。Chrome Session 只保存可展開的證據原文及分析結果。發布條件見 [資料使用規格](docs/GOOGLE_MAPS_DATA_USAGE_SPEC.md) 與 [授權查核](docs/GOOGLE_MAPS_COMPLIANCE_REVIEW.md)。
 
 ## Brand Commitments
 

@@ -153,6 +153,9 @@ def test_sdk_body_and_attempt_count_with_retry_and_continuation_disabled(provide
             llm_absa._analyze_with_gemini(AnalyzeRequest.model_validate(payload("gemini")).reviews)
 
     assert len(requests) == 1
+    assert requests[0]["store"] is False
+    assert "previous_interaction_id" not in requests[0]
+    assert "background" not in requests[0]
     assert requests[0]["generation_config"]["max_output_tokens"] == 4096
     assert "咖啡很好喝" in requests[0]["input"]
     assert "schema" in requests[0]["response_format"]

@@ -6,7 +6,10 @@ from threading import Event
 
 import pytest
 
+from app import main
 from app.cache import SQLiteCache, create_fingerprint
+from app.core.schemas import AnalyzeRequest, LLMABSAOutput
+from app.services.gemini_limits import GeminiLimits, GeminiQuotaExceededError
 
 
 def test_fingerprint_is_stable_for_same_payload():
@@ -197,3 +200,49 @@ def test_conditional_eviction_leaves_a_concurrent_new_write(cache_path, monkeypa
 
     assert cache.get("p1", "old") is None
     assert cache.get("p1", "new") == {"analyzed_count": 7}
+
+
+def test_write_and_startup_cleanup_delete_only_expired_cache_rows_and_keep_quota(cache_path, monkeypatch):
+    cache = SQLiteCache(cache_path)
+    quota = GeminiLimits(cache_path, daily_calls=1, concurrent_calls=1)
+    monkeypatch.setattr("app.services.gemini_limits.utc_day", lambda: "2025-01-01")
+    with quota.reserve():
+        pass
+
+    start = 1_000_000
+    monkeypatch.setattr("app.cache.time.time", lambda: start)
+    cache.set("expired-by-write", "a", {})
+    monkeypatch.setattr("app.cache.time.time", lambda: start + cache.ttl_seconds)
+    cache.set("expired-by-startup", "b", {})
+    cache.set("current", "c", {"analyzed_count": 2})
+    with cache._connect() as connection:
+        places = {row[0] for row in connection.execute("SELECT place_id FROM cache")}
+        assert places == {"expired-by-startup", "current"}
+        connection.execute("UPDATE cache SET cached_at = ? WHERE place_id = ?", (start, "expired-by-startup"))
+
+    SQLiteCache(cache_path)
+    with cache._connect() as connection:
+        places = {row[0] for row in connection.execute("SELECT place_id FROM cache")}
+        assert places == {"current"}
+    with pytest.raises(GeminiQuotaExceededError), quota.reserve():
+        pytest.fail("Cache cleanup must not reset the daily quota")
+
+
+def test_analyze_caches_derived_result_without_raw_input_fields(client, monkeypatch):
+    monkeypatch.setattr(main, "analyze_reviews", lambda reviews, **settings: LLMABSAOutput(
+        decision_pros="Synthetic summary", decision_cons="",
+    ))
+    request = AnalyzeRequest.model_validate({
+        "place_id": "test-place", "scraped_at": "2025-01-01T00:00:00Z",
+        "reviews": [{"review_id": "test-review", "rating": 5, "text": "Synthetic raw review"}],
+    })
+    main.analyze(request)
+    with main.cache._connect() as connection:
+        serialized, = connection.execute("SELECT value FROM cache WHERE place_id = ?", (request.place_id,)).fetchone()
+
+    assert "Synthetic raw review" not in serialized
+    assert "test-review" not in serialized
+    row = json.loads(serialized)
+    assert set(row) == {"format_version", "fingerprint", "analysis_key", "write_id", "response"}
+    assert row["response"]["decision_pros"] == "Synthetic summary"
+    assert row["response"]["analyzed_count"] == 1

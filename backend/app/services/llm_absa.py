@@ -445,6 +445,7 @@ def _analyze_with_gemini(
     gemini_request = {
         "model": model,
         "input": prompt,
+        "store": False,
         "response_format": {
             "type": "text",
             "mime_type": "application/json",

@@ -57,6 +57,12 @@ flowchart TD
 
 The backend selects up to 50 text-bearing reviews and 20,000 review-text characters. It deduplicates review IDs and applies a deterministic budget using review IDs. Concurrent misses with the same analysis key share one in-flight result and, when eligible, one Gemini call. Practical information is returned only when its source can be checked against the selected reviews.
 
+## Data handling | 資料處理
+
+分析由使用者主動發起。API 請求包含商家 ID、擷取時間，及每則評論的 ID、星等和正文。作者活動量、商家名稱與評論日期不由目前的 Extension 上傳。Chrome 工作階段只保存可展開的優缺點證據原文及結果，讓側欄重開後恢復。SQLite 快取有七天有效期，過期列於啟動、快取寫入或讀到過期項目時清理。Gemini 單輪請求使用 `store: false`，供應商的其他留存與帳戶條件仍須確認。
+
+公開發布仍需要確認 Google Maps 內容授權、Gemini 與 Render 實際設定、正式政策及 Chrome Web Store 揭露。 [資料使用規格](docs/GOOGLE_MAPS_DATA_USAGE_SPEC.md) · [隱私政策雙語草稿](docs/PRIVACY_POLICY_DRAFT.md) · [合規與授權查核](docs/GOOGLE_MAPS_COMPLIANCE_REVIEW.md)
+
 ## Tech Stack | 技術架構
 
 | Layer | Technologies |

@@ -1,196 +1,49 @@
-# AI Consumer Decision Assistant — Data Usage Specification
+# Lumora for Google Maps — 資料使用規格
 
-- **Document status:** Draft for compliance review
-- **Repository:** `fly0331/GoogleMapReview-Denoiser`
-- **Branch reviewed:** `master`
-- **Review date:** 2026-11-26
-- **Product:** Chrome Extension + FastAPI backend + Gemini API
-- **Important:** This document describes observed implementation behavior. It is not a legal opinion and does not establish permission from Google or any other rights holder.
+**狀態：Draft，供合規與發布驗收。**
 
-## 1. Product purpose and user interaction
+**盤點日期：2026-11-27（臺灣時間）。範圍：QA 2.4 本機原始碼與測試。**
 
-AI Consumer Decision Assistant is a Chrome Extension that summarizes Google Maps reviews into decision guidance, practical visit information, recommended dishes, and aspect analysis. The user opens a Google Maps place page and explicitly clicks **「分析目前商家」** in the extension. The extension then collects review information from the currently displayed Google Maps page, sends it to the configured FastAPI backend, and displays the resulting analysis.
+本文件記錄程式可查證的資料處理。正式部署、第三方帳戶設定、評論授權與法律適用性仍待核對。發布門檻見 [Google Maps 授權與 Chrome Web Store 查核](GOOGLE_MAPS_COMPLIANCE_REVIEW.md)。
 
-The intended product is free to use, with no advertisements, subscription fees, sale of review data, or direct monetization of review data.
+## 資料流與本次差異
 
-## 2. Data collection
+1. **Google Maps DOM → Content Script**。使用者按「開始消費分析」或「重新分析」後才擷取目前商家評論。擴充功能嘗試切換最新排序，無法切換時採用當前順序。擷取最多 50 則；展開原文後讀取評論 ID、星等、正文、相對時間。以前另讀取作者評論數，並送出固定為空的絕對日期欄位。QA 2.4 移除這兩項的現行擷取輸出。
+2. **Content Script → Background → FastAPI**。商家名稱與工作識別用於本機驗證與顯示。以前後端收到作者評論數與日期；目前 HTTP body 為 `place_id`、`scraped_at`、每則評論的 `review_id`、`rating`、`text`。相對時間只有瀏覽器證據顯示需要。Content Script 以同一個投影函式量測實際序列化請求的 UTF-8 bytes。超過 512 KiB 時，以統一正文上限縮短各則評論，保留完整 ID 與原有順序。
+3. **FastAPI → Gemini／SQLite**。API 在完整解析前檢查 body bytes，並驗證最多 50 則評論、欄位大小及時間格式。後端先查快取與 Single-flight，再從有內文評論選樣，最多 50 則及 20,000 個內文字元。Gemini 請求包含固定指令、選中的 ID／星等／正文、輸出 Schema 與 token 設定。以前未指定 Interaction 儲存選項；現在每次明確送出 `store: false`。相同分析共用既有 Single-flight，Mock、快取命中及無合格評論不呼叫 Gemini。SQLite 保存分析回應與索引，輸入原文與完整 Prompt 在應用層只於處理期間使用。
+4. **Background → Chrome Session Storage → Side Panel**。進行中快照只含任務資料，不含評論陣列。成功前台原本保留整批評論；現在只寫入優點與缺點區塊可展開的證據原文、ID、星等及日期顯示需要的資料。推薦餐點和到訪資訊仍有結果與證據 ID，但現有 UI 沒有對應的原文展開入口，因此只被這些區塊引用的評論不保留原文。重新開啟側欄會恢復商家、分析結果及可展開證據，`analyzed_count` 使用後端原值。
 
-### 2.1 Source and trigger
+## 完整資料盤點
 
-- Source: review cards rendered in the user's current Google Maps page.
-- Trigger: user clicks the extension's analysis action.
-- Collection behavior: the content script locates review cards, expands available review text, scrolls the review container, deduplicates by review ID, and collects up to 50 reviews.
-- The implementation does not establish that the reviews are sorted by newest. The extension should not claim newest-first collection.
-- Collection relies partly on Google Maps DOM selectors and may break if the page structure changes.
+「後端」指 Extension 的現行 HTTP 請求和 FastAPI 實際處理。Gemini 僅適用於 Gemini 模式的合格快取未命中。SQLite 清除、工作階段刪除與日誌保留的細節見下節。
 
-### 2.2 Fields collected
+| 資料 | 來源與目的 | 傳至後端 | 傳至 Gemini | 儲存、留存及刪除 | 產品必要性 |
+| --- | --- | --- | --- | --- | --- |
+| 評論正文 `text` | Maps 評論卡展開正文。用於消費分析、引句驗證及原文回查。 | 是，單則最多 5,000 字元並受傳輸預算約束 | 是，僅選中的評論 | 工作記憶體持有擷取批次直到任務結束；Chrome 成功快照僅保留 Pros／Cons 證據正文；SQLite 無輸入正文欄位，但衍生文字可能含摘錄。供應商留存另見下節。 | 分析與證據所需。正文可能包含個人、敏感或可識別資訊。 |
+| `review_id` | 評論卡 `data-review-id`，用於去重、歸屬與證據連結。 | 是，最多 256 字元 | 是，僅選中樣本 | Chrome 保存可展開證據與結果內證據 ID；SQLite 在衍生分析中保留證據 ID，按快取條件刪除。 | 必要。可連回評論，因此不宣稱匿名。 |
+| `place_id` | 從目前 Maps 頁面 URL 解析。用於商家驗證及快取隔離。 | 是，最多 512 字元 | 不作為獨立欄位傳送 | Chrome 任務快照、SQLite 每個商家一筆的鍵值。除非開啟本機診斷，不寫入應用事件。 | 必要。可反映使用者選擇分析的地點。 |
+| `verifiedTitle` | 由商家標題或已驗證的語意標籤確認。本機識別及顯示。 | 否 | 否 | Chrome 任務快照與執行時記憶體，依工作階段條件清除。 | 商家辨識與 UI 所需。 |
+| `rating` | 評論卡的無障礙標籤。供模型理解及原文顯示。 | 是 | 是，僅選中樣本 | Chrome 只保留證據星等；SQLite 保留衍生的面向評分及摘要。 | 必要。 |
+| `relative_time` | 評論卡的相對發布時間，最多 128 字元，用於原文顯示。 | 已停止。舊 API 呼叫仍可提供。 | 否 | 瀏覽器擷取記憶體，及成功快照中可展開證據。 | 僅本機證據顯示所需。 |
+| `review_date` | 現行擷取不取得絕對日期。舊證據可能有此欄位，UI 仍可正確讀取。 | 現行 Extension 不送，API 保留相容欄位 | 否 | 若已有合法舊證據日期，只隨被引用證據留在工作階段。 | 現階段無須新收集。 |
+| 作者評論數、姓名、頭像、個人頁面 | 正式流程只曾讀取作者評論數。這次移除該 DOM 讀取，且 Background 用欄位白名單防止非必要欄位送出。 | 現行 Extension 不送。後端的 `author_reviews_count` 留作舊客戶端／離線 Cleaner 相容。 | 否 | 現行快照與快取無獨立作者欄位。舊 API 相容值若由呼叫端提供，可能影響舊格式的請求指紋。 | 正式流程不需要。 |
+| `scraped_at` | 擷取完成後產生的 UTC 時間，供現行 API 驗證。 | 是 | 否 | 請求處理期。SQLite 使用獨立產生的 `cached_at`，分析指紋也不含 `scraped_at`。 | 現行 API 合約所需。 |
+| 目前頁面 URL、Tab ID、Request ID、階段、擷取數、排序結果與截止時間 | Chrome 當前分頁、工作執行與身分檢查。URL 僅用以解析頁面與商家，不收集瀏覽歷史。 | 否，POST 只送解析出的 Place ID | 否 | 原始頁面 URL 不寫入任務快照。Tab／Request ID、狀態與進度使用 Chrome Session；部分識別及診斷只在啟用除錯時出現在本機 console。 | 現有功能、避免跨商家錯配與結果恢復所需。 |
+| 連線 IP 與限流時間戳 | ASGI 連線來源，可信代理明確設定後可解析轉送來源。用於防濫用。 | 隨網路連線可見，非 JSON 欄位 | 使用者 IP 不寫入模型請求。供應商可能觀察後端連線與自身服務中繼資料。 | 程序記憶體滑動窗預設 60 秒，受按鍵存取、週期性請求清理及程序退出影響。預設每 100 次檢查清理過期鍵，閒置時可能留到下次掃描。Uvicorn、Render 與前置代理日誌留存待查。 | 服務安全所需，不用於分析、追蹤或行銷。 |
+| Request fingerprint／analysis key、write ID、Cache Version、`cached_at` | FastAPI 從商家 ID 和評論內容等產生 SHA-256 指紋，再加模式、模型、Prompt 雜湊、格式及預算組成分析 key。SQLite 另建立寫入識別及時間戳。 | 後端產生 | 否 | 程序內協調至任務完成。SQLite 隨快取列保存及清除。雜湊可以比對相同輸入，不能據此宣稱匿名。 | 快取隔離、去重及並行清除所需。 |
+| 完整 Prompt、模型回應中的來源引句 | 後端固定指令加上模型樣本；Google 回應中的原文引句用於驗證。 | 後端組裝或接收 | Prompt 是，來源引句則由 Gemini 回傳 | 應用程式處理記憶體，不寫入完整 Prompt 或獨立引句欄位；供應商處理見下節。 | 分析與證據核對所需。 |
+| LLM Output、`analyzed_count`、模式、Model ID、`cache_hit` | 模型、Mock 及後端產生。供消費摘要、實用資訊、餐點、優缺點、評分與分析狀態顯示。 | 後端組裝並回傳 | 模型回應來自 Gemini，後端後設欄位不回傳給 Gemini | SQLite 七天有效，按清理條件刪除。Chrome 結果則依工作階段清除。衍生摘要與推薦描述可能含原文摘錄或個人資訊。 | 產品核心結果。 |
+| Error Logs、事件與除錯旗標 | 程式產生錯誤與診斷。FastAPI 記錄 cache／single-flight 事件與失敗碼。瀏覽器可透過本機 `sessionStorage` 旗標啟用額外診斷。 | 無獨立 client log 上傳 | 無 app error log 上傳 | 失敗訊息在 Chrome 任務快照。瀏覽器 console 可能有請求 ID、商家 ID、Tab ID、診斷或例外。正常程式事件不輸出整批評論或完整 Prompt。Web 伺服器、代理、Render 與錯誤追蹤的讀取權限、遮罩、留存及刪除仍待查。 | 最小維運診斷所需，擴充除錯可選。 |
+| Gemini 每日額度 | UTC 日期及使用次數，供全站模型防護。 | 後端產生 | 否 | SQLite 的 `gemini_daily_quota` 表。程式以 UTC 日期切換，不套用快取清理；歷史列未配置自動刪除。 | 成本與併發防護，不含使用者或評論 ID。 |
 
-| Field | Description | Observed use |
-|---|---|---|
-| `place_id` | Place identifier parsed from the Google Maps page URL | Backend cache key and request context |
-| `review_id` | Review identifier from the review card's `data-review-id` attribute | Deduplication, evidence linking, Gemini input |
-| `rating` | Star rating parsed from an accessibility label | Gemini input and original review display |
-| `text` | Expanded review text, capped at 5,000 Unicode characters and shortened further when required by the request budget | Review selection, Gemini input, and evidence display use the transmitted text |
-| `relative_time` | Relative date text displayed in the review card | Original review display |
-| `author_reviews_count` | Review count shown for the review author, when parseable | Retained in the request and fingerprint; not used for selection |
-| `review_date` | Absolute review date field | Currently always set to `null` by the content script |
-| `scraped_at` | UTC timestamp generated when collection completes | Request timestamp |
+## 留存與刪除
 
-The current implementation does not collect reviewer names, profile photos, email addresses, phone numbers, or precise user location as explicit review fields. This statement is limited to the inspected collection code and should be rechecked if the implementation changes.
+- **Chrome**。快照使用 `chrome.storage.session`，無固定分鐘 TTL。商家改變、Tab 關閉或新任務覆寫時清除／取代既有記錄。關閉側欄不清除結果，重新開啟及 Service Worker 單獨重啟可恢復。Chrome 也會在擴充功能停用、重新載入、更新或瀏覽器重啟時清空 Session 記錄。本程式沒有將評論寫入 `chrome.storage.local`、`chrome.storage.sync` 或其他瀏覽器持久儲存。 [Chrome Storage 文件](https://developer.chrome.com/docs/extensions/reference/api/storage#session)
+- **SQLite**。分析快取預設七天後不再命中。初始化及成功寫入時以時間條件刪除過期資料；讀到某個已過期項目時也會條件式刪除。長時間閒置且沒有清理觸發時，過期列可能仍在檔案內。清理只處理 `cache` 表，維持 QA 2.3 的並行保護，不影響每日額度。SQL DELETE 為資料列層級清除。資料庫、WAL、備份、快照或第三方紀錄的物理清除和留存另需驗收。應用程式未配置 SQLite 自有加密。 [Render 持久磁碟文件](https://render.com/docs/disks)
+- **Gemini**。單輪 Interactions 明確送 `store: false`，沒有 `previous_interaction_id`、遠端對話歷史、Grounding 或 Background 生成，也維持單次嘗試與停用自動續跑。此設定退出預設的 Interaction 狀態儲存，不會追溯清除既有請求，也不改變帳戶的安全／濫用監控、模型改善條款或其他供應商留存。免費與付費條款、AI Studio 項目留存、歷史請求及 ZDR 狀態均須在正式帳戶驗收。 [Interactions API](https://aistudio.google.com/docs/interactions-overview#data-storage-retention) · [Gemini API 條款](https://aistudio.google.com/docs/terms) · [Gemini ZDR 文件](https://aistudio.google.com/docs/zdr)
 
-## 3. Data transmission
+## 服務、權限與發布
 
-### 3.1 Extension to backend
+Production Build 設定以 HTTPS 連線至 Render 的 API 網域。Local Build 設定以 HTTP 連線至 `127.0.0.1:8000`。Manifest 使用 `activeTab`、`sidePanel`、`storage`，以及相應的 Google Maps 和 API host 權限。應用程式沒有廣告、資料銷售、Analytics 或持續的瀏覽／定位蒐集流程。Render 服務區域、方案、日誌、持久磁碟及備份設定尚待確認。 [Render DPA](https://render.com/dpa) · [Render 日誌文件](https://render.com/docs/logging)
 
-The extension sends an `AnalyzeRequest` to the configured API endpoint. The request contains:
-
-- `place_id`
-- `scraped_at`
-- `reviews[]`, with `review_id`, `rating`, `text`, `relative_time`, `author_reviews_count`, and `review_date`
-
-The currently reviewed `master` version uses `http://127.0.0.1:8000` as its API base URL. This is a development configuration, not a production deployment endpoint. A production release must use a secured production endpoint and must not include the localhost host permission.
-
-The request is user-triggered. The inspected code does not show continuous/background collection or an analytics event pipeline.
-
-### 3.2 Backend processing
-
-The FastAPI backend:
-
-1. Validates the request, including a maximum of 120 reviews, a maximum review text length of 5,000 characters, and a maximum `place_id` length of 256 characters.
-2. Creates a SHA-256 fingerprint from the place ID and serialized review payload.
-3. Checks the SQLite cache.
-4. On a cache miss, selects reviews with unique nonblank IDs and usable text within the Gemini budget.
-5. Sends eligible reviews to the configured LLM analysis implementation.
-6. Returns analysis results and stores the response in the SQLite cache.
-
-A cache hit returns the cached analysis response without repeating selection or Gemini analysis.
-
-### 3.3 Backend to Gemini
-
-When `MOCK_LLM` is not enabled, the backend sends the selected reviews with non-empty text to the Gemini API in a single call. When none qualify, it skips the call.
-
-The Gemini input contains only:
-
-- `review_id`
-- `rating`
-- `text`
-
-It does not include the `place_id`, `scraped_at`, `relative_time`, `author_reviews_count`, or `review_date` fields in the inspected implementation.
-
-The extension checks the complete serialized request against a 512 KiB UTF-8 budget and applies a uniform character cap to review texts when needed. Review identifiers are kept intact. The backend allocates the Gemini selection budget in a deterministic ID-based order and skips reviews that do not fit the 50-review and 20,000 review-text character limits. It separately checks the serialized Gemini request size and configures an output token cap. The configured model defaults to `gemini-3.5-flash-lite`, and the API key is read by the backend from `GEMINI_API_KEY`; it is not embedded in the extension code.
-
-The actual Gemini account tier, applicable service terms, retention settings, and data-use settings are operational/account facts and cannot be established from repository code. They must be verified before release.
-
-## 4. Analysis and derived data
-
-Gemini returns a decision summary, practical visit information, recommended dishes, positive and negative aspect summaries, and aspect scores in one Structured Output response. Practical categories cover budget, wait time, reservations, parking, dining time limits, payment, and other actionable details.
-
-The backend checks evidence IDs against the reviews actually sent to Gemini. It also verifies that each practical item's source quote occurs in the corresponding review, checks written numbers and common adjacent units against the verified quotes, and omits unsupported items. Source quotes are used during validation and are not included in the API response.
-
-## 5. Data returned to the extension
-
-The backend response includes:
-
-- `cache_hit` and `analysis_mode`
-- Number of reviews selected for analysis
-- Decision summary, recommended dishes, pros and cons, and aspect scores
-- Verified practical visit information and its evidence review IDs
-
-The extension retains the collected reviews in React application state and displays original evidence for Pros / Cons. Practical visit information shows the derived summary and categorization in the side panel. The inspected code does not show the extension writing review content to `chrome.storage`.
-
-## 6. Storage and retention
-
-### 6.1 SQLite analysis cache
-
-The backend SQLite cache stores:
-
-- `place_id`
-- a JSON envelope containing cache format version, request fingerprint, and serialized analysis response
-- cache timestamp
-
-The cached response contains derived analysis results and evidence review IDs. The response does not include a separate original review text or verification quote field. Derived summaries, including deterministic Mock summaries, may reproduce excerpts from the reviews.
-
-The application enforces a seven-day cache TTL and deletes expired entries during initialization, cache writes, and expired cache reads. This is an application-level expiry policy; it is not a guarantee that all filesystem, SQLite WAL/SHM, backup, snapshot, or infrastructure copies are immediately and irreversibly erased.
-
-The inspected cache implementation enables SQLite WAL mode and a five-second busy timeout. No explicit database encryption is shown in the inspected code.
-
-### 6.2 Browser memory and logs
-
-- The extension keeps review data in application memory to support analysis and evidence display.
-- The content script currently logs the full collected review objects to the browser console (`Collected reviews`). This should be removed before a public release.
-- No use of `chrome.storage` for review persistence was identified in the inspected files. Recheck the complete repository before making a definitive privacy-policy statement.
-- Server, hosting-provider, proxy, crash, and third-party service logs have not been audited in this repository review.
-
-## 7. Permissions and network scope
-
-The inspected Manifest V3 manifest declares `activeTab`, `sidePanel`, and `storage` permissions, and host permissions for Google Maps domains plus the local development API. The `storage` permission appears unused in the inspected code and should be reviewed. The localhost permission is development-only and must be removed or replaced for production.
-
-The extension communicates with the backend over HTTP in the current local-development configuration. A public release must use HTTPS and an appropriately secured backend.
-
-## 8. Monetization and sharing
-
-The intended product model is:
-
-- Free to use
-- No advertisements
-- No subscription fees
-- No sale or licensing of review data or analysis results
-- No direct revenue generated from review data
-
-The product sends eligible review content to a third-party AI provider (Gemini) for its core analysis function. This transfer must be clearly disclosed to users and assessed against applicable provider terms and platform policies. A free, ad-free model does not itself establish rights to collect, process, transmit, or create derived works from third-party content.
-
-## 9. User disclosure and consent requirements before release
-
-Before public distribution, provide a clear and accessible disclosure explaining, at minimum:
-
-1. What review fields are collected.
-2. That collection starts when the user initiates analysis.
-3. That review content is sent to the service backend.
-4. That eligible review text, rating, and review ID are sent to Gemini for analysis.
-5. What analysis results are cached, where, and for how long at the application level.
-6. Whether any operational logs or backups may retain information and their retention periods.
-7. How users can contact the operator and request support or data deletion, where applicable.
-8. The applicable privacy policy and terms.
-
-The disclosure must accurately reflect the deployed architecture, provider settings, and actual operational retention—not just the source-code behavior described here.
-
-## 10. Unresolved compliance and operational questions
-
-The following are not answered by the inspected code:
-
-- Whether Google authorizes this collection method and the creation/display of review-derived analysis for general users and arbitrary businesses.
-- Whether review identifiers and original review text may be transmitted to Gemini and displayed again as evidence.
-- Which Gemini API terms, data-use settings, and retention rules apply to the actual project account and selected service tier.
-- Whether backend hosting, database, logs, backups, and monitoring introduce additional processors or retention.
-- Whether the planned Chrome Web Store disclosures and Limited Use declarations fully describe all data collection and third-party transfers.
-- Whether the final production deployment has suitable access controls, rate limits, abuse prevention, deletion procedures, and incident response.
-
-## 11. Release gate
-
-**Do not publicly launch or submit the extension to the Chrome Web Store until:**
-
-- Google Maps content-use authorization has been clarified through reliable written guidance and/or legal review.
-- Gemini API terms and account data-use settings have been verified.
-- Production data flows, processors, logs, storage, backups, and retention have been documented.
-- Full-review console logging has been removed.
-- The privacy policy, in-product disclosure, and Chrome Web Store privacy declarations match the actual production behavior.
-- Production API transport and security controls are in place.
-
----
-
-## Implementation references reviewed
-
-The following files on the `master` branch were inspected for this draft:
-
-- `extension/manifest.json`
-- `extension/src/App.tsx`
-- `extension/src/api.ts`
-- `extension/src/content.ts`
-- `extension/src/types.ts`
-- `backend/app/main.py`
-- `backend/app/core/schemas.py`
-- `backend/app/cache.py`
-- `backend/app/services/llm_absa.py`
-- `backend/app/services/review_selection.py`
-
-This inventory should be updated whenever collection, transmission, storage, provider, or deployment behavior changes.
+[隱私政策雙語草稿](PRIVACY_POLICY_DRAFT.md)和[授權查核與發布門檻](GOOGLE_MAPS_COMPLIANCE_REVIEW.md)仍需核對正式設定、聯絡方式、刪除流程及使用者揭露。程式測試只能確認本機程式及送出的 payload。

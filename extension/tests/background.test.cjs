@@ -28,10 +28,12 @@ function setup(initialUrl = placeUrl) {
   const panelBehaviors = [];
   const logs = [];
   const collectionRequests = [];
+  const analysisRequests = [];
   const tab = { id: 7, url: initialUrl };
   let pendingTabRead;
   let receive;
   let update;
+  let remove;
   let signal;
   let sequence = 0;
   const scope = {
@@ -61,12 +63,13 @@ function setup(initialUrl = placeUrl) {
           }
         },
         onUpdated: { addListener: (fn) => { update = fn; } },
-        onRemoved: { addListener() {} },
+        onRemoved: { addListener: (fn) => { remove = fn; } },
       },
     },
     require(name) {
-      if (name === "./api") return { analyzeReviews: async (_, abortSignal) => {
+      if (name === "./api") return { analyzeReviews: async (request, abortSignal) => {
         events.push("POST");
+        analysisRequests.push(request);
         signal = abortSignal;
         return analysis.promise;
       } };
@@ -86,7 +89,8 @@ function setup(initialUrl = placeUrl) {
   const snapshot = () => sendFromPanel({ type: "GET_ANALYSIS_STATE", tabId: 7 });
   const start = (options = {}) => sendFromPanel({ type: "START_FROM_PANEL", tabId: 7, placeId, ...options });
   return {
-    events, panelBehaviors, values, start, snapshot, logs, collectionRequests, tab, sendFromPanel,
+    events, panelBehaviors, values, start, snapshot, logs, collectionRequests, analysisRequests, tab, sendFromPanel,
+    closeTab: () => remove(tab.id),
     sendFromMaps: (type) => receive({ type, tabId: tab.id, placeId }, { ...contentSender, url: tab.url }, assert.fail),
     deferTabRead: () => { pendingTabRead = deferred(); return pendingTabRead; },
     restart: () => { scope.require("./background"); },
@@ -115,6 +119,7 @@ function setup(initialUrl = placeUrl) {
 
 const reviews = [{ review_id: "r1", rating: 5, text: "Helpful and friendly" }];
 const collectionResponse = { ok: true, newest: false, verifiedTitle: "測試商家", data: { place_id: placeId, reviews } };
+const pros = [{ aspect: "服務", sentiment: "positive", summary: "服務周到", evidence_review_ids: ["r1"] }];
 
 test("persists the verified merchant while opening reviews and after a binding failure", async () => {
   const worker = setup();
@@ -247,7 +252,7 @@ test("a panel click starts one task, deduplicates subsequent clicks and restores
   worker.collection.resolve(collectionResponse);
   await flush();
   assert.equal((await worker.snapshot()).phase, "analyzing");
-  worker.analysis.resolve({ model_id: "gemini-fixture" });
+  worker.analysis.resolve({ model_id: "gemini-fixture", pros });
   await flush();
   const restored = await worker.snapshot();
   assert.equal(restored.phase, "done");
@@ -255,6 +260,56 @@ test("a panel click starts one task, deduplicates subsequent clicks and restores
   assert.equal(restored.result.model_id, "gemini-fixture");
   assert.equal(restored.reviews[0].review_id, "r1");
   assert.deepEqual(worker.events, ["COLLECT_FOR_ANALYSIS", "POST"]);
+});
+
+test("sends only analysis fields and retains only expandable session evidence", async () => {
+  const worker = setup();
+  await worker.start();
+  await flush();
+  const collected = [
+    { ...reviews[0], relative_time: "3 days ago", author_reviews_count: 3, author_name: "Synthetic Author", review_date: null },
+    { review_id: "r2", rating: 2, text: "Synthetic caution", relative_time: null, review_date: "2025-01-01" },
+    { review_id: "r3", rating: 4, text: "Synthetic dish-only review" },
+    { review_id: "r4", rating: 4, text: "Synthetic visit-only review" },
+    { review_id: "r5", rating: 4, text: "Synthetic unreferenced review" },
+  ];
+  worker.collection.resolve({ ...collectionResponse, data: {
+    place_id: placeId, scraped_at: "2025-01-02T00:00:00Z", reviews: collected,
+  } });
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(worker.analysisRequests[0])), {
+    place_id: placeId, scraped_at: "2025-01-02T00:00:00Z",
+    reviews: collected.map(({ review_id, rating, text }) => ({ review_id, rating, text })),
+  });
+  assert.equal("reviews" in worker.values[key], false);
+
+  worker.analysis.resolve({
+    analyzed_count: 5, pros,
+    cons: [{ evidence_review_ids: ["r2", "r1", "unknown"] }],
+    recommended_dishes: [{ evidence_review_ids: ["r3"] }],
+    practical_visit_information: [{ evidence_review_ids: ["r4"] }],
+  });
+  await flush();
+  const storedEvidence = [
+    { ...reviews[0], relative_time: "3 days ago" },
+    { review_id: "r2", rating: 2, text: "Synthetic caution", relative_time: null, review_date: "2025-01-01" },
+  ];
+  assert.deepEqual(JSON.parse(JSON.stringify(worker.values[key].reviews)), storedEvidence);
+  worker.restart();
+  assert.deepEqual(JSON.parse(JSON.stringify((await worker.snapshot()).reviews)), storedEvidence);
+  assert.equal((await worker.snapshot()).result.analyzed_count, 5);
+  worker.navigate();
+  await flush();
+  assert.equal(await worker.snapshot(), undefined);
+  assert.equal(worker.values[key], undefined);
+});
+
+test("closing a tab deletes its completed review evidence", async () => {
+  const worker = setup();
+  worker.values[key] = { placeId, tabId: 7, phase: "done", result: { pros }, reviews };
+  worker.closeTab();
+  await flush();
+  assert.equal(worker.values[key], undefined);
 });
 
 test("navigation aborts an ongoing POST and rejects the late result", async () => {
@@ -487,6 +542,7 @@ test("correlates the panel click, collection dispatch and content error code wit
 test("the panel button starts analysis and a reopened panel restores and refreshes results", async () => {
   const worker = setup();
   const stateUpdates = [];
+  const displayedEvidence = [];
   const noopEvent = { addListener() {}, removeListener() {} };
   let storageChanged;
   let cleanup;
@@ -501,7 +557,9 @@ test("the panel button starts analysis and a reopened panel restores and refresh
   }).outputText;
 
   const render = (tag, props) => {
+    if (typeof tag === "function") return tag(props);
     if (tag === "button") click = props.disabled ? undefined : props.onClick;
+    if (tag === "p" && props.className?.includes("whitespace-pre-wrap")) displayedEvidence.push(props.children);
     return null;
   };
   const scope = {
@@ -575,13 +633,15 @@ test("the panel button starts analysis and a reopened panel restores and refresh
   assert.equal(panelState.task.phase, "analyzing");
   assert.equal(panelState.task.verifiedTitle, "原商家");
   cleanup();
-  worker.analysis.resolve({ model_id: "first" });
+  worker.analysis.resolve({ model_id: "first", pros });
   await flush();
   assert.equal((await worker.snapshot()).phase, "done");
 
   scope.exports.default();
   await flush();
   assert.equal(stateUpdates.at(-1).task.result.model_id, "first");
+  scope.exports.default();
+  assert.deepEqual(displayedEvidence, [reviews[0].text]);
   assert.deepEqual(worker.events, ["COLLECT_FOR_ANALYSIS", "POST"]);
 
   const secondPlace = "0x3:0x4";

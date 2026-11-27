@@ -7,24 +7,11 @@ import {
     type AnchorDiagnostics, type PlaceAnchor,
 } from "./maps-context";
 import {
-    REVIEW_COLLECTION_LIMIT as MAX_REVIEWS,
+    REVIEW_COLLECTION_LIMIT as MAX_REVIEWS, toAnalyzeRequest,
     type CollectionProgress, type CollectionRequest, type CollectionResponse, type CollectionStarted, type MerchantVerified,
 } from "./analysis-task";
 
-interface ReviewData {
-    review_id: string;
-    rating: number;
-    text: string;
-    relative_time: string | null;
-    author_reviews_count: number | null;
-    review_date: string | null;
-}
-
-interface CollectionResult {
-    place_id: string;
-    scraped_at: string;
-    reviews: ReviewData[];
-}
+import type { CollectedReview, CollectedReviews } from "./types";
 
 const CARD_SELECTOR = '[data-review-id]';
 const SCROLL_DELAY = 700;
@@ -43,27 +30,6 @@ function exceedsCharacterLimit(text: string, limit: number): boolean {
     return text.length > limit && Array.from(text).length > limit;
 }
 
-function parseAuthorReviewsCount(card: Element): number | null {
-    const text = card.querySelector(".RfnDt")?.textContent ?? "";
-
-    const patterns = [
-        /(\d[\d,]*)\s*(?:則評論|則評論|篇評論)/i,
-        /(\d[\d,]*)\s*reviews?/i,
-        /(\d[\d,]*)\s*条评价/i,
-        /(\d[\d,]*)\s*件のクチコミ/i,
-    ];
-
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) {
-            const count = Number(match[1].replace(/,/g, ""));
-            return Number.isSafeInteger(count) ? count : null;
-        }
-    }
-
-    return null;
-}
-
 function parseRating(card: Element): number | null {
     const ratingElement = card.querySelector(
         'span[role="img"][aria-label]'
@@ -75,7 +41,7 @@ function parseRating(card: Element): number | null {
     return match ? Number(match[1]) : null;
 }
 
-function extractReview(card: Element): ReviewData | null {
+function extractReview(card: Element): CollectedReview | null {
     const reviewId = card.getAttribute("data-review-id");
 
     if (!reviewId || exceedsCharacterLimit(reviewId, MAX_REVIEW_ID_CHARS)) return null;
@@ -94,20 +60,18 @@ function extractReview(card: Element): ReviewData | null {
         rating,
         text: truncateText(text, MAX_REVIEW_TEXT_CHARS),
         relative_time: relativeTime ? truncateText(relativeTime, MAX_RELATIVE_TIME_CHARS) : null,
-        author_reviews_count: parseAuthorReviewsCount(card),
-        review_date: null,
     };
 }
 
-function fitRequestBody(request: CollectionResult): CollectionResult {
+function fitRequestBody(request: CollectedReviews): CollectedReviews {
     const encoder = new TextEncoder();
-    const fits = (data: CollectionResult) => encoder.encode(JSON.stringify(data)).byteLength <= MAX_REQUEST_BODY_BYTES;
+    const fits = (data: CollectedReviews) => encoder.encode(JSON.stringify(toAnalyzeRequest(data))).byteLength <= MAX_REQUEST_BODY_BYTES;
     if (fits(request)) return request;
 
     // Apply the largest uniform text cap that fits without reordering or dropping review IDs.
     let low = 0;
     let high = MAX_REVIEW_TEXT_CHARS - 1;
-    const withTextCap = (limit: number): CollectionResult => ({
+    const withTextCap = (limit: number): CollectedReviews => ({
         ...request,
         reviews: request.reviews.map((review) => ({ ...review, text: truncateText(review.text, limit) })),
     });
@@ -224,8 +188,8 @@ function resolveTablessBinding(placeId: string, title: string): ReviewBinding | 
 async function collectReviews(
     placeId: string, binding: ReviewBinding, rebind: () => Promise<ReviewBinding>, signal: AbortSignal,
     onProgress: (count: number) => void,
-): Promise<CollectionResult> {
-    const collected = new Map<string, ReviewData>();
+): Promise<CollectedReviews> {
+    const collected = new Map<string, CollectedReview>();
     let idleRounds = 0;
 
     while (

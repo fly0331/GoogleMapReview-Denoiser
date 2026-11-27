@@ -1,8 +1,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type {
-  AnalyzeRequest,
   AnalyzeResponse,
+  CollectedReview,
   PracticalVisitInformation,
   VisitInformationCategory,
 } from "./types";
@@ -18,7 +18,7 @@ const taskStatus: Record<AnalysisTask["phase"], string> = {
 };
 
 function formatReviewDate(
-  reviewDate: string | null,
+  reviewDate: string | null | undefined,
   relativeTime: string | null
 ): string | null {
   if (relativeTime) return relativeTime;
@@ -117,7 +117,7 @@ function EvidenceList({
   reviews,
 }: {
   evidenceIds: string[];
-  reviews: AnalyzeRequest["reviews"];
+  reviews: CollectedReview[];
 }) {
   const evidenceReviews = (evidenceIds ?? [])
     .map((id) => reviews.find((review) => review.review_id === id))
@@ -330,7 +330,7 @@ function AspectAnalysisList({
   type,
 }: {
   items: AnalyzeResponse["pros"];
-  reviews: AnalyzeRequest["reviews"];
+  reviews: CollectedReview[];
   type: "pros" | "cons";
 }) {
   const isPros = type === "pros";

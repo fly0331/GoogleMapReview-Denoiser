@@ -3,15 +3,21 @@ export interface ReviewInput {
   review_id: string;
   rating: number;
   text: string;
+}
+
+export interface CollectedReview extends ReviewInput {
   relative_time: string | null;
-  author_reviews_count: number | null;
-  review_date: string | null;
+  review_date?: string | null;
 }
 
 export interface AnalyzeRequest {
   place_id: string;
   scraped_at: string;
   reviews: ReviewInput[];
+}
+
+export interface CollectedReviews extends AnalyzeRequest {
+  reviews: CollectedReview[];
 }
 
 export interface ReviewAnalysis {

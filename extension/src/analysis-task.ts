@@ -1,8 +1,16 @@
-import type { AnalyzeRequest, AnalyzeResponse } from "./types";
+import type { AnalyzeRequest, AnalyzeResponse, CollectedReview, CollectedReviews } from "./types";
 
 export const ANALYSIS_TASK_PREFIX = "analysis-task:";
 export const REVIEW_COLLECTION_LIMIT = 50;
 export const taskKey = (tabId: number) => ANALYSIS_TASK_PREFIX + tabId;
+
+export function toAnalyzeRequest({ place_id, scraped_at, reviews }: CollectedReviews): AnalyzeRequest {
+  return {
+    place_id,
+    scraped_at,
+    reviews: reviews.map(({ review_id, rating, text }) => ({ review_id, rating, text })),
+  };
+}
 
 export interface StartAnalysisRequest {
   type: "START_FROM_PANEL";
@@ -27,7 +35,7 @@ export interface AnalysisTask {
   failedPhase?: ActiveAnalysisPhase;
   newest?: boolean;
   result?: AnalyzeResponse;
-  reviews?: AnalyzeRequest["reviews"];
+  reviews?: CollectedReview[];
   error?: string;
   errorCode?: string;
 }
@@ -40,7 +48,7 @@ export interface CollectionRequest {
 }
 
 export type CollectionResponse =
-  | { ok: true; data: AnalyzeRequest; newest: boolean; verifiedTitle: string }
+  | { ok: true; data: CollectedReviews; newest: boolean; verifiedTitle: string }
   | { ok: false; error: string; errorCode?: string; verifiedTitle?: string };
 
 export interface MerchantVerified {

@@ -35,16 +35,21 @@ test("normalizes review fields without truncating identifiers", async () => {
   assert.equal(response.data.reviews[0].review_id, id);
   assert.equal(response.data.reviews[0].text, "😀".repeat(5000));
   assert.equal(response.data.reviews[0].relative_time, "週".repeat(128));
+  assert.deepEqual(Object.keys(response.data.reviews[0]).sort(), ["rating", "relative_time", "review_id", "text"]);
 });
 
 test("caps the serialized UTF-8 payload without dropping or reordering reviews", async () => {
   const ids = Array.from({ length: 50 }, (_, index) => `review-${index}`);
-  const page = setup(fixtureTabs, title, { reviewIds: ids, reviewText: "😀".repeat(5000) });
+  const page = setup(fixtureTabs, title, { reviewIds: ids, reviewText: "😀".repeat(5000), relativeTime: "週".repeat(128) });
   const response = await page.collect();
   assert.equal(response.ok, true);
   const data = JSON.parse(JSON.stringify(response.data));
   assert.deepEqual(data.reviews.map((review) => review.review_id), ids);
-  assert.ok(new TextEncoder().encode(JSON.stringify(data)).byteLength <= 512 * 1024);
+  const scope = { exports: {} };
+  vm.runInNewContext(compiled.get("./analysis-task"), scope);
+  const payload = scope.exports.toAnalyzeRequest(data);
+  assert.ok(new TextEncoder().encode(JSON.stringify(payload)).byteLength <= 512 * 1024);
+  assert.equal(Object.hasOwn(payload.reviews[0], "relative_time"), false);
   const length = Array.from(data.reviews[0].text).length;
   assert.ok(length > 0 && length < 5000);
   assert.ok(data.reviews.every((review) => review.text === "😀".repeat(length)));
@@ -91,6 +96,7 @@ function setup(tabs, heading = title, {
         : !!this.parentElement?.children.includes(this) && this.parentElement.isConnected;
     }
     querySelector(selector) {
+      assert.notEqual(selector, ".RfnDt", "author activity must not be read");
       if (this.role === "card" && selector.startsWith("span[role")) return { getAttribute: () => "5 顆星" };
       if (this.role === "card" && selector === ".wiI7pd") return { textContent: reviewText ?? "Review " + this.getAttribute("data-review-id") };
       if (this.role === "card" && selector === ".rsqaWe" && relativeTime) return { textContent: relativeTime };

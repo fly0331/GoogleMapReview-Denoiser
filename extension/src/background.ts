@@ -1,6 +1,6 @@
 import { analyzeReviews } from "./api";
 import {
-  REVIEW_COLLECTION_LIMIT, taskKey, type AnalysisTask, type CollectionRequest, type CollectionResponse, type StartAnalysisResponse,
+  REVIEW_COLLECTION_LIMIT, taskKey, toAnalyzeRequest, type AnalysisTask, type CollectionRequest, type CollectionResponse, type StartAnalysisResponse,
 } from "./analysis-task";
 import { getMapsPlaceId, logReviewTrace } from "./maps-context";
 
@@ -93,13 +93,21 @@ async function run(task: ActiveTask) {
       await cancel(tabId, task, "PLACE_ID_MISMATCH");
       return;
     }
-    const result = await analyzeReviews(response.data, task.abort.signal);
+    const result = await analyzeReviews(toAnalyzeRequest(response.data), task.abort.signal);
     const finalTab = await chrome.tabs.get(tabId);
     if (!finalTab.url || getMapsPlaceId(finalTab.url) !== placeId) {
       await cancel(tabId, task, "PLACE_ID_MISMATCH");
       return;
     }
-    await publish(task, { phase: "done", result, reviews: response.data.reviews });
+    // Only Pros/Cons have an original-review disclosure in the side panel.
+    const evidenceIds = new Set([...(result.pros ?? []), ...(result.cons ?? [])]
+      .flatMap((item) => item.evidence_review_ids ?? []));
+    const reviews = response.data.reviews.filter((review) => evidenceIds.has(review.review_id))
+      .map(({ review_id, rating, text, relative_time, review_date }) => ({
+        review_id, rating, text, relative_time: relative_time ?? null,
+        ...(review_date != null && { review_date }),
+      }));
+    await publish(task, { phase: "done", result, reviews });
   } catch (error) {
     const phase = task.snapshot.phase;
     await publish(task, {
