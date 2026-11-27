@@ -19,7 +19,7 @@ export interface PlaceAnchor {
   title: string;
   tabs: HTMLElement;
   reviewTab: HTMLElement;
-  titleSource: "heading" | "review_label";
+  titleSource: "heading" | "review_label" | "main_label";
 }
 
 export interface AnchorDiagnostics {
@@ -30,6 +30,9 @@ export interface AnchorDiagnostics {
     nested: boolean;
     hasMain: boolean;
     hasTitle: boolean;
+    hasMainLabel: boolean;
+    titleSource: PlaceAnchor["titleSource"] | undefined;
+    nameCheck: "matched" | "missing_reference" | "ambiguous_main" | "main_label_mismatch" | "selected_named_tab_unverified";
     visible: boolean;
     parentMainMatches: boolean;
     reviewTabFound: boolean;
@@ -54,11 +57,13 @@ function readTabs(tablist: HTMLElement, title: string) {
     .filter((tab) => tab.closest(TAB_LIST) === tablist)
     .map((tab) => {
       const text = tab.textContent?.trim();
-      const namedTitle = NAMED_REVIEW_LABEL.exec(tab.getAttribute("aria-label")?.trim() ?? "")?.[1];
+      const ariaLabel = tab.getAttribute("aria-label")?.trim() ?? "";
+      const namedTitle = NAMED_REVIEW_LABEL.exec(ariaLabel)?.[1];
       return {
         tab,
         reviewText: text === "評論" || text === "Reviews",
         hasNamedLabel: namedTitle !== undefined,
+        namedTitle,
         labelTitleMatches: namedTitle === undefined ? null : normalizePlaceTitle(namedTitle) === normalizePlaceTitle(title),
       };
     });
@@ -77,6 +82,7 @@ function findReviewTab(tabs: ReturnType<typeof readTabs>): HTMLElement | null {
 export function findPlaceAnchor(diagnostics?: AnchorDiagnostics, verifiedReviewTitle?: string): PlaceAnchor | null {
   const anchors: PlaceAnchor[] = [];
   let visibleScopes = 0;
+  let visibleMains: HTMLElement[] | undefined;
   const tablists = document.querySelectorAll<HTMLElement>(TAB_LIST);
   if (diagnostics) {
     diagnostics.tablists.length = 0;
@@ -92,24 +98,38 @@ export function findPlaceAnchor(diagnostics?: AnchorDiagnostics, verifiedReviewT
     const parentMainMatches = !!root && tabs.parentElement?.closest(MAIN) === root;
     const eligible = !nested && !!root && visible && parentMainMatches;
     if (eligible) visibleScopes++;
-    const referenceTitle = title || verifiedReviewTitle;
+    const mainLabel = root?.getAttribute("aria-label")?.trim() || undefined;
+    const referenceTitle = title || verifiedReviewTitle || mainLabel;
     if ((!eligible || !referenceTitle) && !diagnostics) continue;
     const tabDetails = readTabs(tabs, referenceTitle ?? "");
     const reviewTab = findReviewTab(tabDetails);
+    const review = tabDetails.find(({ tab }) => tab === reviewTab);
+    const titleSource = title ? "heading" : verifiedReviewTitle ? "review_label" : mainLabel ? "main_label" : undefined;
+    let nameCheck: AnchorDiagnostics["tablists"][number]["nameCheck"] = "matched";
+    // A headingless first visit needs independent agreement from the unique visible main and its selected named tab.
+    // A known title can still corroborate a redrawn tab when Maps omits the main label.
+    if (!referenceTitle) nameCheck = "missing_reference";
+    else if (!title) {
+      if (mainLabel && normalizePlaceTitle(mainLabel) !== normalizePlaceTitle(referenceTitle)) {
+        nameCheck = "main_label_mismatch";
+      } else if (review?.labelTitleMatches !== true || !reviewTab ||
+          reviewTab.getAttribute("aria-selected") !== "true" || !isVisible(reviewTab)) {
+        nameCheck = "selected_named_tab_unverified";
+      } else {
+        visibleMains ??= [...document.querySelectorAll<HTMLElement>(MAIN)].filter(isVisible);
+        if (visibleMains.length !== 1 || visibleMains[0] !== root) nameCheck = "ambiguous_main";
+      }
+    }
     if (diagnostics) diagnostics.tablists.push({
       nested, hasMain: !!root, hasTitle: !!title, visible, parentMainMatches, reviewTabFound: !!reviewTab,
-      tabs: tabDetails.map(({ tab, ...details }, index) => ({
-        index, ...details, selected: tab.getAttribute("aria-selected") === "true",
+      hasMainLabel: !!mainLabel, titleSource, nameCheck,
+      tabs: tabDetails.map(({ tab, reviewText, hasNamedLabel, labelTitleMatches }, index) => ({
+        index, reviewText, hasNamedLabel, labelTitleMatches, selected: tab.getAttribute("aria-selected") === "true",
       })),
     });
-    if (!eligible || !root || !reviewTab || !referenceTitle) continue;
-    if (!title) {
-      // A rebuilt reviews panel can omit the heading. Require the selected tab's
-      // named label to independently corroborate the title captured before navigation.
-      const review = tabDetails.find(({ tab }) => tab === reviewTab);
-      if (review?.labelTitleMatches !== true || reviewTab.getAttribute("aria-selected") !== "true") continue;
-    }
-    anchors.push({ root, title: referenceTitle, tabs, reviewTab, titleSource: title ? "heading" : "review_label" });
+    if (!eligible || !root || !reviewTab || !referenceTitle || !titleSource || nameCheck !== "matched") continue;
+    const anchorTitle = titleSource === "main_label" ? review?.namedTitle?.trim() : referenceTitle;
+    if (anchorTitle) anchors.push({ root, title: anchorTitle, tabs, reviewTab, titleSource });
   }
   const verified = anchors.filter((anchor) =>
     (verifiedReviewTitle === undefined || normalizePlaceTitle(anchor.title) === normalizePlaceTitle(verifiedReviewTitle)) &&

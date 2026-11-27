@@ -96,6 +96,12 @@ function setup(initialUrl = placeUrl) {
     signal: () => signal,
     collecting: (requestId = "request-1", verifiedTitle, url = tab.url) =>
       receive({ type: "COLLECTION_STARTED", requestId, verifiedTitle }, { ...contentSender, url }),
+    verified: (verifiedTitle, overrides = {}, sender = {}) =>
+      receive({ type: "MERCHANT_VERIFIED", requestId: "request-1", placeId, verifiedTitle, ...overrides },
+        { ...contentSender, url: tab.url, ...sender }),
+    progress: (count, overrides = {}, sender = {}) =>
+      receive({ type: "COLLECTION_PROGRESS", requestId: "request-1", placeId, count, ...overrides },
+        { ...contentSender, url: tab.url, ...sender }),
     samePlaceLoading: () => {
       update(tab.id, { status: "loading" });
       update(tab.id, { status: "loading", url: tab.url });
@@ -108,7 +114,117 @@ function setup(initialUrl = placeUrl) {
 }
 
 const reviews = [{ review_id: "r1", rating: 5, text: "Helpful and friendly" }];
-const collectionResponse = { ok: true, newest: false, data: { place_id: placeId, reviews } };
+const collectionResponse = { ok: true, newest: false, verifiedTitle: "測試商家", data: { place_id: placeId, reviews } };
+
+test("persists the verified merchant while opening reviews and after a binding failure", async () => {
+  const worker = setup();
+  await worker.start();
+  worker.verified("過期名稱", { requestId: "old" });
+  worker.verified("其他商家", { placeId: "0x3:0x4" });
+  worker.verified("非頂層", {}, { frameId: 1 });
+  worker.verified("其他分頁", {}, { tab: { id: 8 } });
+  assert.equal((await worker.snapshot()).verifiedTitle, undefined);
+  worker.verified(" 已驗證商家 ");
+  assert.equal((await worker.snapshot()).phase, "opening_reviews");
+  assert.equal(worker.values[key].verifiedTitle, "已驗證商家");
+  worker.collection.resolve({ ok: false, errorCode: "REVIEW_DOM_TIMEOUT", error: "評論載入逾時" });
+  await flush();
+  assert.equal((await worker.snapshot()).phase, "failed");
+  assert.equal((await worker.snapshot()).verifiedTitle, "已驗證商家");
+  assert.ok(!worker.events.includes("POST"));
+});
+
+test("recovers the verified title from the active failure reply if notification was missed", async () => {
+  const worker = setup();
+  await worker.start();
+  worker.collection.resolve({
+    ok: false, errorCode: "REVIEW_DOM_TIMEOUT", error: "評論載入逾時", verifiedTitle: "已驗證商家",
+  });
+  await flush();
+  assert.equal((await worker.snapshot()).verifiedTitle, "已驗證商家");
+});
+
+test("keeps a title from the collection reply even when collection-start source URL is stale", async () => {
+  const worker = setup();
+  await worker.start();
+  worker.collecting("request-1", "其他商家", placeUrl.replace(placeId, "0x3:0x4"));
+  assert.equal((await worker.snapshot()).verifiedTitle, undefined);
+  worker.collection.resolve({ ...collectionResponse, verifiedTitle: "正確商家" });
+  await flush();
+  assert.equal((await worker.snapshot()).phase, "analyzing");
+  assert.equal((await worker.snapshot()).verifiedTitle, "正確商家");
+  worker.analysis.resolve({ analyzed_count: 1 });
+  await flush();
+  worker.restart();
+  const restored = await worker.snapshot();
+  assert.equal(restored.phase, "done");
+  assert.equal(restored.verifiedTitle, "正確商家");
+});
+
+test("does not create a nameless result from a legacy reply without a verified title", async () => {
+  const worker = setup();
+  await worker.start();
+  worker.collection.resolve({ ...collectionResponse, verifiedTitle: undefined });
+  await flush();
+  assert.equal((await worker.snapshot()).phase, "failed");
+  assert.ok(!worker.events.includes("POST"));
+});
+
+test("progress accepts only monotonic verified updates and reconciles the final count from the collection reply", async () => {
+  const worker = setup();
+  await worker.start();
+  worker.progress(1);
+  assert.equal((await worker.snapshot()).collectionProgress, undefined);
+  worker.collecting();
+  worker.progress(1, { requestId: "old-request" });
+  worker.progress(1, { placeId: "0x3:0x4" });
+  worker.progress(1, {}, { frameId: 1 });
+  worker.progress(1, {}, { tab: { id: 8 } });
+  worker.progress(51);
+  worker.progress(0.5);
+  assert.equal((await worker.snapshot()).collectionProgress.count, 0);
+  worker.progress(1);
+  worker.progress(0);
+  assert.equal((await worker.snapshot()).collectionProgress.count, 1);
+  assert.equal(worker.values[key].collectionProgress.count, 1);
+  worker.collection.resolve({ ...collectionResponse, data: {
+    ...collectionResponse.data, reviews: [...reviews, { ...reviews[0], review_id: "r2" }],
+  } });
+  await flush();
+  worker.progress(10);
+  assert.equal((await worker.snapshot()).phase, "analyzing");
+  assert.equal((await worker.snapshot()).collectionProgress.count, 2);
+  worker.analysis.resolve({ analyzed_count: 1 });
+  await flush();
+  worker.progress(20);
+  assert.equal((await worker.snapshot()).collectionProgress.count, 2);
+  assert.equal((await worker.snapshot()).result.analyzed_count, 1);
+  assert.equal(worker.events.filter((event) => event === "POST").length, 1);
+});
+
+test("progress from a cancelled task cannot update a new task for the same place", async () => {
+  const worker = setup();
+  await worker.start();
+  worker.collecting();
+  worker.progress(1);
+  const previous = worker.collection;
+  worker.navigate();
+  worker.navigate(placeId);
+  worker.resetResponses();
+  await worker.start();
+  worker.collecting("request-2");
+  worker.progress(10);
+  assert.equal((await worker.snapshot()).collectionProgress.count, 0);
+  worker.progress(1, { requestId: "request-2" });
+  assert.equal((await worker.snapshot()).collectionProgress.count, 1);
+  previous.resolve(collectionResponse);
+  worker.collection.resolve({ ok: false, error: "fixture" });
+  await flush();
+  worker.progress(20, { requestId: "request-2" });
+  assert.equal((await worker.snapshot()).phase, "failed");
+  assert.equal((await worker.snapshot()).failedPhase, "collecting");
+  assert.equal((await worker.snapshot()).collectionProgress.count, 1);
+});
 
 test("initializes native toolbar opening without starting an analysis", async () => {
   const worker = setup();
@@ -440,6 +556,14 @@ test("the panel button starts analysis and a reopened panel restores and refresh
   click();
   await flush();
   assert.equal((await worker.snapshot()).phase, "opening_reviews");
+  worker.collecting("request-1", "原商家");
+  worker.progress(1);
+  cleanup();
+  scope.exports.default();
+  await flush();
+  assert.equal(panelState.task.phase, "collecting");
+  assert.equal(panelState.task.verifiedTitle, "原商家");
+  assert.equal(panelState.task.collectionProgress.count, 1);
   worker.collection.resolve({ ...collectionResponse, verifiedTitle: "原商家" });
   await flush();
   assert.equal((await worker.snapshot()).phase, "analyzing");

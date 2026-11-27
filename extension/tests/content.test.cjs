@@ -17,7 +17,7 @@ const fixtureTabs = [
   { text: "評論", ariaLabel: "對「雞白湯專門 拉麵一貴 らーめん一貴」的評論", selected: "false" },
   { text: "簡介", ariaLabel: "雞白湯專門 拉麵一貴 らーめん一貴簡介", selected: "false" },
 ];
-const compiled = new Map(["content", "review-ownership", "maps-context"].map((name) => [
+const compiled = new Map(["content", "review-ownership", "maps-context", "analysis-task"].map((name) => [
   "./" + name,
   ts.transpileModule(fs.readFileSync(path.join(__dirname, "../src", name + ".ts"), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -26,7 +26,7 @@ const compiled = new Map(["content", "review-ownership", "maps-context"].map((na
 
 function setup(tabs, heading = title, {
   cardCount = 0, sortLabel, debug = false, fixturePlaceId = placeId, deferReviewDom = false,
-  scrollReviews = false,
+  scrollReviews = false, initialScrollTop = 0,
 } = {}) {
   class ElementFixture {
     constructor(role) {
@@ -35,6 +35,8 @@ function setup(tabs, heading = title, {
       this.children = [];
     }
     getAttribute(name) { return this.attributes[name] ?? null; }
+    hasAttribute(name) { return this.getAttribute(name) !== null; }
+    get id() { return this.getAttribute("id") ?? ""; }
     setAttribute(name, value) { this.attributes[name] = value; }
     getClientRects() {
       return this.getAttribute("hidden") === null ? [{}] : [];
@@ -61,6 +63,7 @@ function setup(tabs, heading = title, {
     }
     querySelectorAll(selector) {
       if (selector === '[role="tab"]') return this.children;
+      if (selector === '[role="tabpanel"]') return this.children.filter((child) => child.role === "tabpanel");
       if (selector === "[data-review-id]") return this.children.flatMap((child) =>
         child instanceof ElementFixture ? [
           ...(child.getAttribute("data-review-id") !== null ? [child] : []),
@@ -118,7 +121,7 @@ function setup(tabs, heading = title, {
     scroller.parentElement = liveMain;
     scroller.scrollHeight = 17577;
     scroller.clientHeight = 815;
-    let top = 0;
+    let top = initialScrollTop;
     Object.defineProperty(scroller, "scrollTop", {
       get: () => top,
       set: (value) => {
@@ -155,10 +158,12 @@ function setup(tabs, heading = title, {
   const createdElements = [];
   let receive;
   const messages = [];
+  const progress = [];
+  const verified = [];
   const logs = [];
   const location = { href: "https://www.google.com/maps/place/test/data=!1s" + fixturePlaceId };
   const context = {
-    URL, AbortController, clearTimeout,
+    URL, AbortController, clearTimeout, performance,
     setTimeout: (callback, delay) => setTimeout(callback, [2500, 12000, 3000, 2000, 700].includes(delay) ? 20 : delay),
     console: { debug: (...args) => logs.push(args) },
     location,
@@ -166,6 +171,10 @@ function setup(tabs, heading = title, {
     window: { addEventListener() {}, navigation },
     document: {
       body: main,
+      getElementById(id) {
+        const search = (root) => root.id === id ? root : root.children.map(search).find(Boolean);
+        return search(liveMain) ?? (extraMain ? search(extraMain) : null);
+      },
       createElement: (name) => { createdElements.push(name); return new ElementFixture(name); },
       querySelectorAll(selector) {
         if (selector === '[role="tablist"]') return [tablist, ...nestedTablists].filter((list) => list.isConnected);
@@ -180,8 +189,14 @@ function setup(tabs, heading = title, {
       disconnect() { observers.delete(this); }
     },
     chrome: { runtime: { id: "extension", onMessage: { addListener(fn) { receive = fn; } }, sendMessage: async (message) => {
-      assert.ok(["MAPS_PLACE_CHANGED", "COLLECTION_STARTED"].includes(message.type));
-      messages.push(message.type);
+      if (message.type === "MERCHANT_VERIFIED") {
+        verified.push(message);
+      } else if (message.type === "COLLECTION_PROGRESS") {
+        progress.push(message);
+      } else {
+        assert.ok(["MAPS_PLACE_CHANGED", "COLLECTION_STARTED"].includes(message.type));
+        messages.push(message.type);
+      }
     } } },
     require(name) {
       const scope = { ...context, exports: {} };
@@ -192,7 +207,7 @@ function setup(tabs, heading = title, {
   context.require("./content");
   return {
     get tablist() { return tablist; },
-    logs,
+    logs, progress, verified,
     createdElements, messages,
     observerCount: () => observers.size,
     setHeading: (value) => { heading = value; },
@@ -211,6 +226,17 @@ function setup(tabs, heading = title, {
       navigation.dispatchEvent(new Event("currententrychange"));
     },
     removeTablist: () => { tablist.remove(); },
+    setMainLabel: (label) => liveMain.setAttribute("aria-label", label),
+    addVisibleMain: () => { extraMain = new ElementFixture("main"); },
+    addPanel: (id, { hidden = false, outside = false } = {}) => {
+      if (outside) extraMain = new ElementFixture("main");
+      const root = outside ? extraMain : liveMain;
+      const panel = new ElementFixture("tabpanel");
+      panel.setAttribute("id", id);
+      if (hidden) panel.setAttribute("hidden", "");
+      panel.parentElement = root;
+      root.append(panel);
+    },
     replaceReviewDom: ({ namedTitle = title, replaceRoot = false } = {}) => {
       if (tablist.isConnected) tablist.remove();
       if (replaceRoot) liveMain = new ElementFixture("main");
@@ -355,6 +381,8 @@ test("opens reviews, collects at most 50 cards and reports an unverified sort", 
   assert.equal(page.reviewTabClicks(), 1);
   assert.equal(response.data.place_id, placeId);
   assert.equal(response.verifiedTitle, title);
+  assert.equal(page.verified[0].verifiedTitle, title);
+  assert.equal(page.verified[0].placeId, placeId);
   assert.equal(response.data.reviews.length, 50);
   assert.equal(response.newest, false);
   assert.deepEqual(page.messages, ["COLLECTION_STARTED"]);
@@ -368,6 +396,138 @@ test("does not click an already selected reviews tab and recognizes verified new
   assert.equal(response.ok, true, response.error);
   assert.equal(page.reviewTabClicks(), 0);
   assert.equal(response.newest, true);
+});
+
+test("verifies an initially selected headingless reviews tab using the main and named labels", async () => {
+  const page = setup([{ text: "評論", selected: "true", ariaLabel: `對「${title}」的評論` }], "", {
+    cardCount: 3, debug: true,
+  });
+  page.setMainLabel(title.replaceAll(" ", "  "));
+  const result = await page.collect();
+  assert.equal(result.ok, true, result.errorCode);
+  assert.equal(result.verifiedTitle, title);
+  assert.equal(result.data.place_id, placeId);
+  assert.equal(page.reviewTabClicks(), 0);
+  assert.equal(page.verified[0].verifiedTitle, title);
+  assert.deepEqual(page.progress.map(({ count }) => count), [3]);
+  const [, details] = page.logs.find(([event]) => event.endsWith("content.review_tab.resolved"));
+  assert.equal(details.tablists[0].titleSource, "main_label");
+  assert.equal(details.tablists[0].nameCheck, "matched");
+});
+
+for (const [reason, change, requestPlace] of [
+  ["mismatched names", (page) => page.setMainLabel("其他商家"), placeId],
+  ["multiple visible mains", (page) => page.addVisibleMain(), placeId],
+  ["wrong Place ID", () => {}, "0x3:0x4"],
+]) {
+  test("rejects an initially headingless reviews view with " + reason, async () => {
+    const page = setup([{ text: "評論", selected: "true", ariaLabel: `對「${title}」的評論` }], "", { cardCount: 3 });
+    page.setMainLabel(title);
+    change(page);
+    const result = await page.collect(requestPlace);
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, requestPlace === placeId ? "REVIEW_ANCHOR_UNAVAILABLE" : "PLACE_ID_MISMATCH");
+    assert.deepEqual(page.verified, []);
+  });
+}
+
+test("does not verify a headingless previous merchant main after the URL advances", async () => {
+  const page = setup([{ text: "評論", selected: "true", ariaLabel: `對「${title}」的評論` }], "", { cardCount: 3 });
+  page.setMainLabel(title);
+  const nextPlace = "0x3:0x4";
+  // The navigation event captures the outgoing main before Maps updates the URL.
+  page.navigate(nextPlace);
+  const result = await page.collect(nextPlace);
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "PLACE_BINDING_MISMATCH");
+  assert.deepEqual(page.verified, []);
+  assert.deepEqual(page.progress, []);
+});
+
+test("reports only newly collected unique reviews and can finish below the limit", async () => {
+  const page = setup(fixtureTabs, title, { cardCount: 10 });
+  const response = await page.collect();
+  assert.equal(response.ok, true);
+  assert.equal(response.data.reviews.length, 10);
+  assert.equal(page.progress.length, 1);
+  assert.equal(page.progress[0].count, 10);
+  assert.equal(page.progress[0].placeId, placeId);
+  assert.equal(page.progress[0].requestId, "fixture");
+});
+
+for (const target of ["missing", "hidden"]) {
+  test("collects already-loaded reviews with a " + target + " aria-controls target", async () => {
+    const page = setup([{ text: "評論", selected: "true" }], title, {
+      cardCount: 10, scrollReviews: true, initialScrollTop: 360, sortLabel: "Sort by: Newest", debug: true,
+    });
+    page.tablist.children[0].setAttribute("aria-controls", "stale-panel");
+    if (target === "hidden") page.addPanel("stale-panel", { hidden: true });
+    const first = await page.collect();
+    assert.equal(first.ok, true, first.error);
+    assert.equal(first.newest, true);
+    assert.equal(first.data.reviews.length, 10);
+    assert.ok(page.scrollCalls() > 0);
+    const again = await page.collect();
+    assert.equal(again.ok, true, again.error);
+    assert.equal(again.verifiedTitle, title);
+    assert.deepEqual(page.verified.map(({ verifiedTitle }) => verifiedTitle), [title, title]);
+    assert.equal(page.reviewTabClicks(), 0);
+    assert.deepEqual(page.messages, ["COLLECTION_STARTED", "COLLECTION_STARTED"]);
+    assert.deepEqual(page.progress.map(({ count }) => count), [10, 10]);
+  });
+}
+
+test("rejects aria-controls pointing outside the verified merchant main", async () => {
+  const page = setup([{ text: "評論", selected: "true" }], title, { cardCount: 10, scrollReviews: true });
+  page.tablist.children[0].setAttribute("aria-controls", "foreign-panel");
+  page.addPanel("foreign-panel", { outside: true });
+  assert.equal((await page.collect()).ok, false);
+  assert.deepEqual(page.messages, []);
+});
+
+test("reanalyzes a previously verified review main when its tablist disappears", async () => {
+  const page = setup([{ text: "評論", selected: "true" }], title, { cardCount: 3, scrollReviews: true });
+  assert.equal((await page.collect()).ok, true);
+  page.setMainLabel(title);
+  page.removeTablist();
+  const result = await page.collect();
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.verifiedTitle, title);
+  assert.deepEqual(page.verified.map(({ verifiedTitle }) => verifiedTitle), [title, title]);
+  assert.equal(result.data.reviews.length, 3);
+  assert.equal(page.reviewTabClicks(), 0);
+});
+
+test("rejects a tabless start without prior verified review context", async () => {
+  const page = setup(fixtureTabs, title);
+  page.replaceWithTabless({ ids: [page.reviewId(0)] });
+  assert.equal((await page.collect()).ok, false);
+  assert.deepEqual(page.messages, []);
+  assert.deepEqual(page.verified, []);
+});
+
+test("reports the merchant before review binding completes and includes it on failure", async () => {
+  const page = setup(fixtureTabs, title, { deferReviewDom: true });
+  const pending = page.collect();
+  await new Promise(setImmediate);
+  assert.equal(page.verified[0].verifiedTitle, title);
+  assert.equal(page.verified[0].requestId, "fixture");
+  assert.deepEqual(page.messages, []);
+  const response = await pending;
+  assert.equal(response.ok, false);
+  assert.equal(response.verifiedTitle, title);
+});
+
+test("does not reuse tabless review context across a place change", async () => {
+  const page = setup([{ text: "評論", selected: "true" }], title, { cardCount: 3, scrollReviews: true });
+  assert.equal((await page.collect()).ok, true);
+  const oldPlaceReview = page.reviewId(0);
+  const nextPlace = "0x3:0x4";
+  page.navigate(nextPlace);
+  page.replaceWithTabless({ ids: [oldPlaceReview] });
+  const response = await page.collect(nextPlace);
+  assert.equal(response.ok, false);
+  assert.deepEqual(page.messages, ["COLLECTION_STARTED", "MAPS_PLACE_CHANGED"]);
 });
 
 test("collection recognizes the same title after Maps repaints the heading", async () => {

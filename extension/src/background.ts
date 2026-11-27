@@ -1,6 +1,6 @@
 import { analyzeReviews } from "./api";
 import {
-  taskKey, type AnalysisTask, type CollectionRequest, type CollectionResponse, type StartAnalysisResponse,
+  REVIEW_COLLECTION_LIMIT, taskKey, type AnalysisTask, type CollectionRequest, type CollectionResponse, type StartAnalysisResponse,
 } from "./analysis-task";
 import { getMapsPlaceId, logReviewTrace } from "./maps-context";
 
@@ -18,6 +18,7 @@ const active = new Map<number, ActiveTask>();
 const COLLECTION_TIMEOUT_MS = 65_000;
 const ANALYSIS_DEADLINE_MS = 65_000;
 const inProgress = (task: AnalysisTask) => task.phase !== "done" && task.phase !== "failed";
+const readVerifiedTitle = (value: unknown) => typeof value === "string" ? value.trim() || undefined : undefined;
 
 function publish(task: ActiveTask, update: Partial<AnalysisTask> = {}) {
   if (active.get(task.snapshot.tabId) !== task) return;
@@ -64,6 +65,8 @@ async function run(task: ActiveTask) {
       errorCode: response?.ok === false ? response.errorCode : undefined,
     });
     if (!response?.ok) {
+      const verifiedTitle = task.snapshot.verifiedTitle ?? readVerifiedTitle(response?.verifiedTitle);
+      if (verifiedTitle) task.snapshot = { ...task.snapshot, verifiedTitle };
       errorCode = response?.errorCode;
       throw new Error(response?.error || "無法連接 Google Maps，請重新整理地標頁。");
     }
@@ -71,8 +74,13 @@ async function run(task: ActiveTask) {
       errorCode = "PLACE_ID_MISMATCH";
       throw new Error("地標已變更，請重新分析。");
     }
-    const verifiedTitle = task.snapshot.verifiedTitle ?? response.verifiedTitle?.trim();
-    if (verifiedTitle) task.snapshot = { ...task.snapshot, verifiedTitle };
+    const verifiedTitle = task.snapshot.verifiedTitle ?? readVerifiedTitle(response.verifiedTitle);
+    if (!verifiedTitle) {
+      errorCode = "REVIEW_ANCHOR_UNAVAILABLE";
+      throw new Error("無法確認商家名稱。請重新整理 Google Maps 商家頁面後再試。");
+    }
+    const collectionProgress = { count: response.data.reviews.length, limit: REVIEW_COLLECTION_LIMIT };
+    task.snapshot = { ...task.snapshot, verifiedTitle, collectionProgress };
     if (!response.data.reviews.some((review) => review.text.trim())) {
       errorCode = "NO_REVIEWS";
       throw new Error("目前沒有可分析的文字評論。");
@@ -93,8 +101,10 @@ async function run(task: ActiveTask) {
     }
     await publish(task, { phase: "done", result, reviews: response.data.reviews });
   } catch (error) {
+    const phase = task.snapshot.phase;
     await publish(task, {
       phase: "failed",
+      failedPhase: phase === "done" || phase === "failed" ? undefined : phase,
       error: error instanceof Error ? error.message : "分析失敗，請再試一次。",
       errorCode,
     });
@@ -149,7 +159,7 @@ function invalidatePlace(tabId: number, nextPlace: string | null) {
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, reply) => {
   if (sender.id !== chrome.runtime.id || typeof message !== "object" || message === null) return;
-  const request = message as { type?: string; placeId?: string; requestId?: string; tabId?: number; debug?: boolean; verifiedTitle?: unknown };
+  const request = message as { type?: string; placeId?: string; requestId?: string; tabId?: number; debug?: boolean; verifiedTitle?: unknown; count?: unknown };
 
   if (request.type === "GET_ANALYSIS_STATE" || request.type === "START_FROM_PANEL") {
     if (sender.tab || sender.url?.split(/[?#]/u, 1)[0] !== chrome.runtime.getURL("index.html") ||
@@ -181,10 +191,28 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, reply) => {
     }
     const task = active.get(tabId);
     if (!task) return;
+    if (request.type === "MERCHANT_VERIFIED" && placeId === task.snapshot.placeId && request.placeId === placeId &&
+        request.requestId === task.snapshot.requestId && task.snapshot.phase === "opening_reviews" && !task.snapshot.verifiedTitle) {
+      const verifiedTitle = readVerifiedTitle(request.verifiedTitle);
+      if (verifiedTitle) void publish(task, { verifiedTitle })?.catch(console.error);
+    }
     if (request.type === "COLLECTION_STARTED" && placeId === task.snapshot.placeId &&
         request.requestId === task.snapshot.requestId && task.snapshot.phase === "opening_reviews") {
-      const verifiedTitle = typeof request.verifiedTitle === "string" ? request.verifiedTitle.trim() : "";
-      void publish(task, { phase: "collecting", ...(verifiedTitle && { verifiedTitle }) })?.catch(console.error);
+      const verifiedTitle = task.snapshot.verifiedTitle ?? readVerifiedTitle(request.verifiedTitle);
+      void publish(task, {
+        phase: "collecting",
+        collectionProgress: { count: 0, limit: REVIEW_COLLECTION_LIMIT },
+        ...(verifiedTitle && { verifiedTitle }),
+      })?.catch(console.error);
+    }
+    const count = request.count;
+    if (
+      request.type === "COLLECTION_PROGRESS" && placeId === task.snapshot.placeId && request.placeId === placeId &&
+      request.requestId === task.snapshot.requestId && task.snapshot.phase === "collecting" &&
+      typeof count === "number" && Number.isInteger(count) && count <= REVIEW_COLLECTION_LIMIT &&
+      count > (task.snapshot.collectionProgress?.count ?? 0)
+    ) {
+      void publish(task, { collectionProgress: { count, limit: REVIEW_COLLECTION_LIMIT } })?.catch(console.error);
     }
     return;
   }

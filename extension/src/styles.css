@@ -13,3 +13,13 @@
     @apply outline outline-2 outline-offset-2 outline-lumora-action;
   }
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .lumora-indeterminate {
+    animation: lumora-indeterminate 1.5s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes lumora-indeterminate {
+  to { transform: translateX(200%); }
+}

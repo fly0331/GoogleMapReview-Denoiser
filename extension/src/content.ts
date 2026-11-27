@@ -6,7 +6,10 @@ import {
     findBoundReviewAnchor, findPlaceAnchor, findTablessReviewMain, getMapsPlaceId, isVisible, logReviewTrace, mapsDebugEnabled,
     type AnchorDiagnostics, type PlaceAnchor,
 } from "./maps-context";
-import type { CollectionRequest, CollectionResponse, CollectionStarted } from "./analysis-task";
+import {
+    REVIEW_COLLECTION_LIMIT as MAX_REVIEWS,
+    type CollectionProgress, type CollectionRequest, type CollectionResponse, type CollectionStarted, type MerchantVerified,
+} from "./analysis-task";
 
 interface ReviewData {
     review_id: string;
@@ -24,7 +27,6 @@ interface CollectionResult {
 }
 
 const CARD_SELECTOR = '[data-review-id]';
-const MAX_REVIEWS = 50;
 const SCROLL_DELAY = 700;
 const MAX_IDLE_ROUNDS = 4;
 
@@ -156,11 +158,10 @@ interface ReviewBinding {
     pane: HTMLElement;
     navigation: PlaceAnchor | null;
     scrollContainer?: HTMLElement;
+    verifyWholeRoot?: boolean;
 }
 
-function resolveTablessBinding(placeId: string, title: string): ReviewBinding | undefined {
-    const root = findTablessReviewMain(placeId, title);
-    if (!root) return;
+function findReviewScroller(root: HTMLElement): HTMLElement | undefined {
     const cards = getReviewCards(root);
     const first = cards.find((card) => parseRating(card) !== null);
     if (!first) return;
@@ -169,13 +170,20 @@ function resolveTablessBinding(placeId: string, title: string): ReviewBinding | 
     for (let node = first.parentElement; node && node !== root && root.contains(node); node = node.parentElement) {
         const scrollable = node.clientHeight > 0 && node.scrollHeight > node.clientHeight + 20;
         if (scrollable && isVisible(node) && cards.every((card) => node.contains(card))) {
-            return { root, pane: node, navigation: null, scrollContainer: node };
+            return node;
         }
     }
 }
 
+function resolveTablessBinding(placeId: string, title: string): ReviewBinding | undefined {
+    const root = findTablessReviewMain(placeId, title);
+    const pane = root && findReviewScroller(root);
+    if (root && pane) return { root, pane, navigation: null, scrollContainer: pane, verifyWholeRoot: true };
+}
+
 async function collectReviews(
     placeId: string, binding: ReviewBinding, rebind: () => Promise<ReviewBinding>, signal: AbortSignal,
+    onProgress: (count: number) => void,
 ): Promise<CollectionResult> {
     const collected = new Map<string, ReviewData>();
     let idleRounds = 0;
@@ -212,6 +220,7 @@ async function collectReviews(
             if (collected.size >= MAX_REVIEWS) break;
         }
 
+        if (collected.size > previousCount) onProgress(collected.size);
         if (collected.size >= MAX_REVIEWS) break;
         const scrollContainer = binding.scrollContainer ??
             (cards.length ? getScrollContainer(cards[0], binding.root) : null);
@@ -273,7 +282,7 @@ function observeUntil<T>(
         signal.addEventListener("abort", abort, { once: true });
         observer.observe(document.body, {
             childList: true, subtree: true, characterData: true, attributes: true,
-            attributeFilter: ["aria-selected", "aria-checked", "aria-pressed", "aria-label", "hidden", "aria-hidden"],
+            attributeFilter: ["aria-selected", "aria-checked", "aria-pressed", "aria-label", "aria-controls", "aria-labelledby", "id", "hidden", "aria-hidden"],
         });
         check();
     });
@@ -284,27 +293,36 @@ const NEWEST = /^(?:最新(?:評論)?|newest|most recent)$/iu;
 const reviewLabel = (element: Element) => (element.getAttribute("aria-label") || element.textContent || "").trim();
 const NO_REVIEWS = /^(?:沒有評論|沒有任何評論|目前沒有評論|no reviews(?: yet)?|there are no reviews yet)[。.]?$/iu;
 
-function selectedReviewRoot(anchor: PlaceAnchor) {
+function selectedReviewRoot(anchor: PlaceAnchor): ReviewBinding | undefined {
     if (anchor.reviewTab.getAttribute("aria-selected") !== "true") return;
+    const root = anchor.root;
     const controlled = anchor.reviewTab.getAttribute("aria-controls");
     if (controlled) {
         const pane = document.getElementById(controlled);
-        return pane && anchor.root.contains(pane) && isVisible(pane) ? pane : undefined;
+        if (pane && !root.contains(pane)) return;
+        if (pane && isVisible(pane)) return { root, pane, navigation: anchor };
     }
-    const panels = [...anchor.root.querySelectorAll<HTMLElement>('[role="tabpanel"]')].filter(isVisible);
+    const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')].filter(isVisible);
     if (panels.length) {
         const matching = panels.filter((panel) =>
             anchor.reviewTab.id && panel.getAttribute("aria-labelledby") === anchor.reviewTab.id,
         );
-        if (matching.length === 1) return matching[0];
-        if (panels.length === 1 && !panels[0].hasAttribute("aria-labelledby")) return panels[0];
+        if (matching.length === 1) return { root, pane: matching[0], navigation: anchor, verifyWholeRoot: !!controlled };
+        if (!controlled && panels.length === 1 && !panels[0].hasAttribute("aria-labelledby")) {
+            return { root, pane: panels[0], navigation: anchor };
+        }
         return;
     }
-    return anchor.root;
+    if (!controlled) return { root, pane: root, navigation: anchor };
+    // With a stale control, require a scoped review list inside the verified selected tab's main.
+    const pane = findReviewScroller(root);
+    if (pane) return { root, pane, navigation: anchor, scrollContainer: pane, verifyWholeRoot: true };
 }
 
-async function tryNewest(root: HTMLElement, assertCurrent: () => void, signal: AbortSignal): Promise<boolean> {
-    const buttons = [...root.querySelectorAll<HTMLElement>('button, [role="button"]')].filter(isVisible);
+async function tryNewest(
+    root: HTMLElement, assertCurrent: () => void, signal: AbortSignal, sortScope = root,
+): Promise<boolean> {
+    const buttons = [...sortScope.querySelectorAll<HTMLElement>('button, [role="button"]')].filter(isVisible);
     const sort = buttons.find((button) => SORT.test(reviewLabel(button)));
     if (!sort) return false;
     const reflectsNewest = () => /^(?:排序(?:方式|評論)?|評論排序|sort(?: by)?)\s*[:：]?\s*(?:最新(?:評論)?|newest|most recent)$/iu.test(reviewLabel(sort));
@@ -342,7 +360,11 @@ class CollectionFailure extends Error {
     constructor(readonly code: string, message: string) { super(message); }
 }
 
-async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal, debug: boolean): Promise<CollectionResponse> {
+let verifiedReviewView: { placeId: string; title: string; root: HTMLElement } | undefined;
+
+async function prepareAndCollect(
+    request: CollectionRequest, signal: AbortSignal, debug: boolean, onVerified: (title: string) => void,
+): Promise<CollectionResponse> {
     const { placeId, requestId } = request;
     const ensureRequestedPlace = () => {
         signal.throwIfAborted();
@@ -351,23 +373,35 @@ async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal
         }
     };
     ensureRequestedPlace();
+    const resumeTabless = () => {
+        const remembered = verifiedReviewView;
+        if (remembered?.placeId !== placeId) return;
+        const binding = resolveTablessBinding(placeId, remembered.title);
+        if (binding?.root === remembered.root) return remembered;
+    };
     const observedAnchor = await observeUntil(() => {
         ensureRequestedPlace();
-        return confirmedPlaceAnchor(placeId) ?? undefined;
+        return confirmedPlaceAnchor(placeId) ?? resumeTabless();
     }, 2500, signal);
     ensureRequestedPlace();
     // Recheck the live DOM before using a node found before an asynchronous redraw.
     const anchor = confirmedPlaceAnchor(placeId, observedAnchor?.title);
-    if (!anchor) {
+    const resumed = !anchor ? resumeTabless() : undefined;
+    const verified = anchor ?? resumed;
+    if (!verified) {
         const code = placeBindingFailure(placeId, observedAnchor?.title) ?? "REVIEW_ANCHOR_UNAVAILABLE";
         throw new CollectionFailure(code, "找不到目前地標的評論分頁。");
     }
-    const verifiedTitle = anchor.title;
-    const initialRoot = anchor.root;
+    const verifiedTitle = verified.title;
+    onVerified(verifiedTitle);
+    const initialRoot = verified.root;
     if (debug) tracePlaceContext("content.review_tab.resolved", requestId, placeId, verifiedTitle);
-    const alreadySelected = anchor.reviewTab.getAttribute("aria-selected") === "true";
-    const previousCards = new Set(alreadySelected ? [] : getReviewCards(anchor.root));
-    if (!alreadySelected) anchor.reviewTab.click();
+    const alreadySelected = !!resumed || anchor?.reviewTab.getAttribute("aria-selected") === "true";
+    const previousCards = new Set(alreadySelected ? [] : getReviewCards(initialRoot));
+    if (!alreadySelected) {
+        verifiedReviewView = undefined;
+        anchor?.reviewTab.click();
+    }
     if (debug) tracePlaceContext("content.review_tab.after_click", requestId, placeId, verifiedTitle);
     let enteredReviews = alreadySelected;
     let lastBinding: ReviewBinding | undefined;
@@ -381,15 +415,13 @@ async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal
             ensureRequestedPlace();
             const liveAnchor = findBoundReviewAnchor(placeId, verifiedTitle);
             if (liveAnchor?.reviewTab.getAttribute("aria-selected") === "true") enteredReviews = true;
-            const tabbedPane = liveAnchor && selectedReviewRoot(liveAnchor);
-            const candidate = liveAnchor && tabbedPane
-                ? { root: liveAnchor.root, pane: tabbedPane, navigation: liveAnchor }
+            const candidate = liveAnchor ? selectedReviewRoot(liveAnchor)
                 : enteredReviews ? resolveTablessBinding(placeId, verifiedTitle) : undefined;
             const pane = candidate?.pane;
             const cards = pane ? getReviewCards(pane) : [];
             const owned = cards.length > 0 && cards.every(
                 (card) => !previousCards.has(card) && !isForeignReview(card, placeId),
-            ) && (candidate?.navigation !== null || (
+            ) && (!candidate?.verifyWholeRoot || (
                 [...candidate.root.querySelectorAll(CARD_SELECTOR)]
                     .every((card) => !isForeignReview(card, placeId))
             ));
@@ -407,13 +439,16 @@ async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal
                 }
                 lastBinding = candidate;
                 bindReviewCards(candidate.pane, placeId);
+                verifiedReviewView = { placeId, title: verifiedTitle, root: candidate.root };
                 return candidate;
             }
             if (pane && !cards.length && [...pane.querySelectorAll<HTMLElement>('p, [role="status"]')].some(
                 (item) => isVisible(item) && NO_REVIEWS.test(item.textContent?.trim() ?? ""),
             )) throw new CollectionFailure("NO_REVIEWS", "這個地標目前沒有評論。");
             if (!reportedWait) {
-                trace("content.review_binding.wait", { phase, anchorFound: !!liveAnchor, paneFound: !!pane, enteredReviews });
+                trace("content.review_binding.wait", {
+                    phase, anchorFound: !!liveAnchor, paneFound: !!pane, enteredReviews, visibleUniqueCards: cards.length,
+                });
                 reportedWait = true;
             }
             return undefined;
@@ -426,8 +461,10 @@ async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal
         const showsReviewTab = diagnostics.tablists.some((list) => list.visible && list.tabs.some(
             (tab) => tab.selected && (tab.reviewText || tab.hasNamedLabel),
         ));
-        const verifiedPane = verifiedAnchor && selectedReviewRoot(verifiedAnchor);
-        const hasForeignCards = !!verifiedPane && getReviewCards(verifiedPane).some((card) => isForeignReview(card, placeId));
+        const verifiedBinding = verifiedAnchor && selectedReviewRoot(verifiedAnchor);
+        const hasForeignCards = !!verifiedBinding &&
+            [...(verifiedBinding.verifyWholeRoot ? verifiedBinding.root : verifiedBinding.pane).querySelectorAll(CARD_SELECTOR)]
+                .some((card) => isForeignReview(card, placeId));
         const unverifiedTabless = !diagnostics.tablistCount &&
             [...document.querySelectorAll('[role="main"]')]
                 .some((main) => main.querySelectorAll(CARD_SELECTOR).length > 0);
@@ -442,15 +479,27 @@ async function prepareAndCollect(request: CollectionRequest, signal: AbortSignal
 
     const initialBinding = await waitForBinding("after_click", 12_000);
     ensureRequestedPlace();
-    const newest = await tryNewest(initialBinding.pane, ensureRequestedPlace, signal);
+    // In the verified tabbed fallback, Maps can place the sort control above the review scroller.
+    const sortScope = initialBinding.navigation && initialBinding.scrollContainer ? initialBinding.root : initialBinding.pane;
+    const newest = await tryNewest(initialBinding.pane, ensureRequestedPlace, signal, sortScope);
     const binding = await waitForBinding("after_sort", 3000);
     void chrome.runtime.sendMessage({ type: "COLLECTION_STARTED", requestId, verifiedTitle } satisfies CollectionStarted).catch(() => {});
-    const data = await collectReviews(placeId, binding, () => waitForBinding("collecting", 3000), signal);
+    let lastProgressAt = -Infinity;
+    const reportProgress = (count: number) => {
+        const now = performance.now();
+        if (now - lastProgressAt < 400 || signal.aborted) return;
+        lastProgressAt = now;
+        void chrome.runtime.sendMessage({
+            type: "COLLECTION_PROGRESS", requestId, placeId, count,
+        } satisfies CollectionProgress).catch(() => {});
+    };
+    const data = await collectReviews(placeId, binding, () => waitForBinding("collecting", 3000), signal, reportProgress);
     return { ok: true, data, newest, verifiedTitle };
 }
 
 let current: { requestId: string; placeId: string; controller: AbortController } | undefined;
 trackPlaceNavigation((placeId) => {
+    if (verifiedReviewView?.placeId !== placeId) verifiedReviewView = undefined;
     if (current && current.placeId !== placeId) {
         current.controller.abort(new CollectionFailure("PLACE_ID_MISMATCH", "地標已變更，已停止擷取。"));
     }
@@ -474,10 +523,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     current = task;
     const debug = request.debug === true || mapsDebugEnabled();
     if (debug) tracePlaceContext("content.collect.received", request.requestId, request.placeId);
-    void prepareAndCollect(request, task.controller.signal, debug).then(reply, (error: unknown) => {
+    let verifiedTitle: string | undefined;
+    void prepareAndCollect(request, task.controller.signal, debug, (title) => {
+        verifiedTitle = title;
+        void chrome.runtime.sendMessage({
+            type: "MERCHANT_VERIFIED", requestId: request.requestId, placeId: request.placeId, verifiedTitle: title,
+        } satisfies MerchantVerified).catch(() => {});
+    }).then(reply, (error: unknown) => {
         const errorCode = error instanceof CollectionFailure ? error.code : "COLLECTION_FAILED";
         if (debug) tracePlaceContext("content.collect.failed", request.requestId, request.placeId, undefined, errorCode);
-        reply({ ok: false, error: error instanceof Error ? error.message : "無法擷取評論。", errorCode } satisfies CollectionResponse);
+        reply({ ok: false, error: error instanceof Error ? error.message : "無法擷取評論。", errorCode, verifiedTitle } satisfies CollectionResponse);
     }).finally(() => { if (current === task) current = undefined; });
     return true;
 });

@@ -62,9 +62,9 @@ function AspectRatingBars({ scores }: { scores?: AnalyzeResponse["aspect_scores"
     .sort(([, first], [, second]) => second - first);
 
   return (
-    <section className="rounded-xl border border-lumora-border bg-white p-4">
+    <section className="border-t border-lumora-border pt-4">
       <details className="group">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm">
+        <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 rounded-sm">
           <h2 className="font-semibold">各面向評分</h2>
           <span aria-hidden="true" className="shrink-0 text-xs font-medium text-lumora-action">
             <span className="group-open:hidden">展開查看 ▾</span>
@@ -86,7 +86,7 @@ function AspectRatingBars({ scores }: { scores?: AnalyzeResponse["aspect_scores"
                     <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
                       <span className="min-w-0 break-words">{formatAspect(aspect)}</span>
                       <span className="shrink-0 font-medium tabular-nums">
-                        {score} / 5<span className="sr-only">（{band.label}）</span>
+                        {score} / 5<span className="text-xs text-lumora-secondary"> · {band.label}</span>
                       </span>
                     </div>
                     <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-lumora-border">
@@ -119,7 +119,7 @@ function EvidenceList({
   evidenceIds: string[];
   reviews: AnalyzeRequest["reviews"];
 }) {
-  const evidenceReviews = evidenceIds
+  const evidenceReviews = (evidenceIds ?? [])
     .map((id) => reviews.find((review) => review.review_id === id))
     .filter((review) => review !== undefined);
 
@@ -132,8 +132,8 @@ function EvidenceList({
   }
 
   return (
-    <details className="mt-3 rounded-lg bg-lumora-cloud p-3">
-      <summary className="cursor-pointer rounded-sm text-xs font-medium text-lumora-action hover:underline">
+    <details className="mt-2">
+      <summary className="min-h-6 cursor-pointer rounded-sm text-sm font-medium text-lumora-action hover:underline">
         查看原始評論（{evidenceReviews.length}）
       </summary>
 
@@ -150,19 +150,18 @@ function EvidenceList({
               key={review.review_id}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-amber-600">
-                  {"★".repeat(review.rating)}
-                  {"☆".repeat(5 - review.rating)}
+                <span className="shrink-0 text-xs font-medium text-amber-800">
+                  {review.rating} / 5 分
                 </span>
 
                 {dateLabel && (
-                  <span className="text-xs text-lumora-secondary">
+                  <span className="min-w-0 break-words text-xs text-lumora-secondary">
                     {dateLabel}
                   </span>
                 )}
               </div>
 
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-lumora-midnight">
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-lumora-midnight">
                 {review.text || "此評論沒有文字內容。"}
               </p>
             </div>
@@ -174,6 +173,89 @@ function EvidenceList({
 }
 
 
+function LineIcon({ path }: { path: string }) {
+  return (
+    <svg aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+      <path d={path} />
+    </svg>
+  );
+}
+
+const progressStages = [
+  { phase: "opening_reviews", label: "確認商家並開啟評論" },
+  { phase: "collecting", label: "擷取評論" },
+  { phase: "analyzing", label: "AI 消費分析" },
+] as const;
+
+function AnalysisProgress({ task, starting }: { task?: AnalysisTask; starting: boolean }) {
+  const phase = starting ? "opening_reviews" : task?.phase === "failed" ? task.failedPhase : task?.phase;
+  const current = progressStages.findIndex((stage) => stage.phase === phase);
+  if (current < 0) return null;
+
+  const failed = task?.phase === "failed";
+  const collection = phase === "collecting" && !failed ? task?.collectionProgress : undefined;
+  return (
+    <div className="mt-3 border-t border-lumora-border pt-3">
+      <ol aria-label="分析階段" className="space-y-2 text-xs">
+        {progressStages.map((stage, index) => (
+          <li
+            key={stage.phase}
+            aria-current={index === current && !failed ? "step" : undefined}
+            className={`flex items-center gap-2 ${index < current ? "text-emerald-700" : index === current ? failed ? "font-semibold text-red-700" : "font-semibold text-lumora-action" : "text-lumora-secondary"}`}
+          >
+            {index < current ? (
+              <><LineIcon path="M4 8l3 3 5-6" /><span className="sr-only">已完成：</span></>
+            ) : (
+              <span aria-hidden="true" className="grid h-4 w-4 shrink-0 place-items-center tabular-nums">{index + 1}</span>
+            )}
+            {stage.label}{index === current && failed && "（未完成）"}
+          </li>
+        ))}
+      </ol>
+      {collection?.count !== undefined && (
+        <div className="mt-3">
+          <p className="mb-1 text-xs tabular-nums text-lumora-secondary">已擷取 {collection.count} / {collection.limit} 則</p>
+          <div
+            role="progressbar"
+            aria-label="評論擷取進度"
+            aria-valuemin={0}
+            aria-valuemax={collection.limit}
+            aria-valuenow={collection.count}
+            className="h-1.5 overflow-hidden rounded-full bg-lumora-border"
+          >
+            <div className="h-full rounded-full bg-lumora-action motion-safe:transition-[width]" style={{ width: `${(collection.count / collection.limit) * 100}%` }} />
+          </div>
+        </div>
+      )}
+      {phase === "analyzing" && !failed && (
+        <div role="progressbar" aria-label="正在分析評論，完成時間未定" className="mt-3 h-1.5 overflow-hidden rounded-full bg-lumora-border">
+          <div className="lumora-indeterminate h-full w-1/3 rounded-full bg-lumora-action" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecommendedDishes({ dishes }: { dishes?: AnalyzeResponse["recommended_dishes"] }) {
+  return (
+    <section className="border-t border-lumora-border pt-4">
+      <h2 className="font-semibold">最推薦餐點</h2>
+      {!dishes?.length ? (
+        <p className="mt-2 text-sm leading-6 text-lumora-secondary">目前評論中沒有足夠明確的餐點推薦資訊。</p>
+      ) : (
+        <ol className="mt-2 list-decimal space-y-2 pl-5 marker:font-semibold marker:text-lumora-action">
+          {dishes.map((dish, index) => (
+            <li className="pl-1 text-sm" key={dish.name + "-" + index}>
+              <h3 className="break-words font-semibold">{dish.name}</h3>
+              <p className="mt-0.5 break-words leading-6 text-lumora-secondary">{dish.summary}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function DecisionSummary({
   decisionPros,
   decisionCons,
@@ -182,22 +264,19 @@ function DecisionSummary({
   decisionCons: string;
 }) {
   return (
-    <section className="rounded-xl border border-lumora-lavender/70 bg-white p-4">
-      <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-lumora-violet" />
-        <h2 className="font-semibold">消費決策摘要</h2>
-      </div>
+    <section className="rounded-xl bg-lumora-lavender/20 p-4">
+      <h2 className="text-lg font-semibold leading-6">消費決策摘要</h2>
 
       <div className="mt-4">
-        <h3 className="text-sm font-semibold text-emerald-700">值得推薦</h3>
-        <p className="mt-1 text-sm leading-5 text-lumora-secondary">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-700"><LineIcon path="M4 8l3 3 5-6" />值得推薦</h3>
+        <p className="mt-1 break-words text-sm leading-6 text-lumora-midnight">
           {decisionPros || "目前評論資訊不足。"}
         </p>
       </div>
 
       <div className="mt-4">
-        <h3 className="text-sm font-semibold text-red-700">消費前須注意</h3>
-        <p className="mt-1 text-sm leading-5 text-lumora-secondary">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-red-700"><LineIcon path="M8 3v6m0 3h.01" />消費前須注意</h3>
+        <p className="mt-1 break-words text-sm leading-6 text-lumora-midnight">
           {decisionCons || "目前評論資訊不足。"}
         </p>
       </div>
@@ -207,26 +286,26 @@ function DecisionSummary({
 
 
 const visitCategories: Record<VisitInformationCategory, { label: string; icon: string }> = {
-  budget: { label: "消費預算", icon: "💰" },
-  wait_time: { label: "候位時間", icon: "⏳" },
-  reservation: { label: "訂位建議", icon: "📅" },
-  parking: { label: "停車資訊", icon: "🅿️" },
-  dining_time_limit: { label: "用餐時間限制", icon: "⏱️" },
-  payment: { label: "付款方式", icon: "💳" },
-  other: { label: "其他實用資訊", icon: "ℹ️" },
+  budget: { label: "消費預算", icon: "M3 5h10v7H3zM3 7h10m-3 3h1" },
+  wait_time: { label: "候位時間", icon: "M8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 2v3l2 1" },
+  reservation: { label: "訂位建議", icon: "M3 5h10v8H3zM5 3v4m6-4v4M3 8h10" },
+  parking: { label: "停車資訊", icon: "M4 13V3h4a3 3 0 0 1 0 6H4" },
+  dining_time_limit: { label: "用餐時間限制", icon: "M8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 2v3l2 1" },
+  payment: { label: "付款方式", icon: "M3 4h10v8H3zM3 7h10" },
+  other: { label: "其他實用資訊", icon: "M8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 4v3m0-5h.01" },
 };
 
 function VisitInformation({ items }: { items: PracticalVisitInformation[] }) {
-  if (items.length === 0) return null;
+  if (!items?.length) return null;
 
   return (
-    <section className="rounded-xl border border-lumora-border bg-white p-4">
+    <section>
       <h2 className="font-semibold">消費實用資訊</h2>
       <ul className="mt-3 divide-y divide-lumora-border/70">
         {Object.entries(visitCategories).map(([category, { label, icon }]) =>
           items.filter((item) => item.category === category).map(({ summary }, index) => (
             <li className="flex items-start gap-3 py-3 first:pt-0" key={category + "-" + index}>
-              <span aria-hidden="true" className="shrink-0">{icon}</span>
+              <LineIcon path={icon} />
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold">{label}</h3>
                 <p className="mt-1 break-words text-sm leading-6 text-lumora-secondary">{summary}</p>
@@ -253,9 +332,9 @@ function AspectAnalysisList({
 }) {
   const isPros = type === "pros";
 
-  const sortedItems = [...items].sort(
+  const sortedItems = [...(items ?? [])].sort(
     (a, b) =>
-      b.evidence_review_ids.length - a.evidence_review_ids.length
+      (b.evidence_review_ids?.length ?? 0) - (a.evidence_review_ids?.length ?? 0)
   );
 
   const badgeColor = isPros
@@ -263,12 +342,10 @@ function AspectAnalysisList({
     : "bg-red-50 text-red-700";
 
   return (
-    <section className="rounded-xl border border-lumora-border bg-white p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-semibold">
-          {isPros ? "優點 Pros" : "缺點 Cons"}
-        </h2>
-      </div>
+    <section>
+      <h3 className={isPros ? "text-sm font-semibold text-emerald-700" : "text-sm font-semibold text-red-700"}>
+        {isPros ? "優點" : "缺點"}
+      </h3>
 
       {sortedItems.length === 0 ? (
         <p className="mt-3 text-sm text-lumora-secondary">
@@ -282,17 +359,17 @@ function AspectAnalysisList({
               key={`${item.aspect}-${index}`}
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-lumora-midnight">
+                <p className="min-w-0 break-words text-sm font-semibold text-lumora-midnight">
                   {formatAspect(item.aspect)}
                 </p>
                 <span
                   className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${badgeColor}`}
                 >
-                  {item.evidence_review_ids.length} 則評論
+                  {item.evidence_review_ids?.length ?? 0} 則佐證
                 </span>
               </div>
 
-              <p className="mt-2 text-sm leading-6 text-lumora-secondary">
+              <p className="mt-1 break-words text-sm leading-6 text-lumora-secondary">
                 {item.summary}
               </p>
 
@@ -305,25 +382,6 @@ function AspectAnalysisList({
         </div>
       )}
     </section>
-  );
-}
-
-function SectionHeading({
-  label,
-  title,
-}: {
-  label: string;
-  title: string;
-}) {
-  return (
-    <div className="border-t border-lumora-border pt-3">
-      <h2 className="text-xs font-semibold tracking-wider text-lumora-secondary">
-        {label}
-      </h2>
-      <p className="mt-1 text-sm font-semibold text-lumora-midnight">
-        {title}
-      </p>
-    </div>
   );
 }
 
@@ -509,167 +567,118 @@ export default function App() {
 
   return (
     <main className="mx-auto min-h-screen max-w-xl px-4 pb-6 pt-5">
-      <header className="space-y-2 border-b border-lumora-border pb-4">
-        <div className="flex items-center gap-3">
-          <img src="/icons/lumora.svg" alt="" width={48} height={48} className="h-12 w-12 shrink-0" />
-          <div className="min-w-0">
-            <h1 className="flex items-baseline gap-1 text-[1.625rem] font-bold leading-7 tracking-[-0.045em] text-lumora-midnight">
-              Lumora
-              <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-lumora-violet" />
-            </h1>
-            <p className="text-sm font-medium leading-5 text-lumora-midnight">AI 消費決策助手</p>
-          </div>
+      <header className="flex items-center gap-2.5 border-b border-lumora-border pb-3">
+        <img src="/icons/lumora.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" />
+        <div className="min-w-0">
+          <h1 className="flex items-baseline gap-1 text-[1.625rem] font-bold leading-7 tracking-[-0.035em] text-lumora-midnight">
+            Lumora
+            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-lumora-violet" />
+          </h1>
+          <p className="text-xs font-medium leading-4">AI 消費決策助手</p>
+          <p lang="en" className="text-xs leading-4 text-lumora-secondary">A brighter way to choose.</p>
         </div>
-        <p lang="en" className="text-xs leading-4 text-lumora-secondary">A brighter way to choose.</p>
       </header>
 
-      {result && (
-        <>
-          <div
-            className={`mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${
-              result.analysis_mode === "mock"
-                ? "border-amber-200 bg-amber-50"
-                : "border-emerald-200 bg-emerald-50"
-            }`}
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                result.analysis_mode === "mock"
-                  ? "bg-amber-500"
-                  : "bg-emerald-500"
-              }`}
-            />
-            <span
-              className={`text-xs font-semibold ${
-                result.analysis_mode === "mock"
-                  ? "text-amber-700"
-                  : "text-emerald-700"
-              }`}
-            >
-              {result.analysis_mode === "mock" ? "MOCK MODE" : "GEMINI MODE"}
-            </span>
-          </div>
+      {!result && (
+        <section className="mt-4 rounded-xl border border-lumora-border bg-white p-4">
+          <h2 className="font-semibold">分析商家評論</h2>
 
-          <p className="mt-2 break-words text-xs text-lumora-secondary">
-            {result.analysis_mode === "mock"
-              ? "目前使用模擬 LLM 分析結果。"
-              : result.model_id
-                ? "本次使用 " + result.model_id + " 進行 AI 評論分析。"
-                : "本次分析的模型名稱未記錄。"}
+          {(task || starting) && (
+            <p className="mt-2 break-words text-sm font-semibold leading-6">
+              分析對象：{task?.verifiedTitle ?? (isLoading ? "正在確認商家名稱" : "商家名稱未記錄")}
+            </p>
+          )}
+
+          <p role="status" aria-atomic="true" className={status ? `mt-2 flex items-center gap-2 text-sm leading-6 ${
+            isLoading ? "text-lumora-action" : result ? "text-emerald-700" : "text-lumora-secondary"
+          }` : "sr-only"}>
+            {isLoading && (
+              <span aria-hidden="true" className="h-4 w-4 shrink-0 rounded-full border-2 border-lumora-lavender border-t-lumora-action motion-safe:animate-spin" />
+            )}
+            <span>
+              {status}
+              {status && !starting && task?.newest === false && "，採用目前評論順序。"}
+            </span>
           </p>
-        </>
+
+          <AnalysisProgress task={task} starting={starting} />
+
+          {failure && (
+            <p role="alert" className="mt-3 break-words rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {failure.message}
+            </p>
+          )}
+
+          {((panel.kind === "merchant" && !failure) || failure?.retry) && (
+            <button
+              className="mt-3 w-full rounded-lg bg-lumora-action px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-lumora-action/90 disabled:cursor-not-allowed disabled:bg-lumora-action/10 disabled:text-lumora-action"
+              disabled={isLoading}
+              onClick={() => failure?.retry === "context" ? actions.current?.check() : void actions.current?.analyze()}
+              type="button"
+            >
+              {failure?.retry === "context" ? "確認商家" : failure || result ? "重新分析" : "AI 消費分析"}
+            </button>
+          )}
+        </section>
       )}
 
-      <section className="mt-4 rounded-xl border border-lumora-border bg-white p-4">
-        <h2 className="font-semibold">分析商家評論</h2>
-
-        {(task || starting) && (
-          <p className="mt-2 break-words text-sm font-semibold leading-6">
-            分析對象：{task?.verifiedTitle ?? (isLoading ? "正在確認商家名稱" : "商家名稱未記錄")}
-          </p>
-        )}
-
-        <p role="status" aria-atomic="true" className={status ? `mt-2 flex items-center gap-2 text-sm leading-6 ${
-          isLoading ? "text-lumora-action" : result ? "text-emerald-700" : "text-lumora-secondary"
-        }` : "sr-only"}>
-          {isLoading && (
-            <span aria-hidden="true" className="h-4 w-4 shrink-0 rounded-full border-2 border-lumora-lavender border-t-lumora-action motion-safe:animate-spin" />
-          )}
-          <span>
-            {status}
-            {status && !starting && task?.newest === false && "，採用目前評論順序。"}
-          </span>
-        </p>
-
-        {failure && (
-          <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {failure.message}
-          </p>
-        )}
-
-        {((panel.kind === "merchant" && !failure) || failure?.retry) && (
-          <button
-            className="mt-3 w-full rounded-lg bg-lumora-action px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-lumora-action/90 disabled:cursor-not-allowed disabled:bg-lumora-action/10 disabled:text-lumora-action"
-            disabled={isLoading}
-            onClick={() => failure?.retry === "context" ? actions.current?.check() : void actions.current?.analyze()}
-            type="button"
-          >
-            {failure?.retry === "context" ? "確認商家" : failure || result ? "重新分析" : "AI 消費分析"}
-          </button>
-        )}
-      </section>
-
       {result && (
-        <div className="mt-4 space-y-3">
-          {/* 第一層：消費決策 */}
-          <SectionHeading
-            label="CONSUMER INSIGHTS"
-            title="先看結論"
-          />
-
-          <DecisionSummary
-            decisionPros={result.decision_pros}
-            decisionCons={result.decision_cons}
-          />
-
-          <VisitInformation items={result.practical_visit_information} />
-
-          <section className="rounded-xl border border-lumora-border bg-white p-4">
-            <h2 className="font-semibold">最推薦餐點</h2>
-
-            {result.recommended_dishes.length === 0 ? (
-              <p className="mt-3 text-sm leading-6 text-lumora-secondary">
-                目前評論中沒有足夠明確的餐點推薦資訊。
+        <div className="mt-3 space-y-5">
+          <section aria-label="分析對象">
+            <h2 className="break-words text-xl font-semibold leading-7">{task?.verifiedTitle ?? "商家名稱未記錄"}</h2>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2">
+              <p role="status" className="text-xs leading-5 text-lumora-secondary">
+                <span className="font-medium text-emerald-700">分析完成</span>
+                {Number.isFinite(result.analyzed_count) && <span> · 已分析 {result.analyzed_count} 則評論</span>}
               </p>
-            ) : (
-              <div className="mt-3 space-y-4">
-                {result.recommended_dishes.map((dish, index) => (
-                  <div
-                    className="flex items-start gap-3 border-b border-lumora-border/70 pb-4 last:border-0 last:pb-0"
-                    key={`${dish.name}-${index}`}
-                  >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-lumora-lavender/25 text-sm font-semibold tabular-nums text-lumora-action">
-                      {index + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="break-words text-sm font-semibold text-lumora-midnight">
-                        {dish.name}
-                      </h3>
-                      <p className="mt-1 break-words text-sm leading-6 text-lumora-secondary">
-                        {dish.summary}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <button
+                className="min-h-8 shrink-0 rounded-sm px-1 text-xs font-medium text-lumora-action underline-offset-4 hover:underline"
+                onClick={() => void actions.current?.analyze()}
+                type="button"
+              >
+                重新分析
+              </button>
+            </div>
+            {result.analysis_mode === "mock" && (
+              <p className="inline-block rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-800">
+                <span lang="en">MOCK MODE</span> · 模擬結果
+              </p>
             )}
           </section>
 
-          {/* 第二層：評論洞察 */}
-          <SectionHeading
-            label="REVIEW ANALYSIS"
-            title="深入了解評論"
-          />
+          <DecisionSummary decisionPros={result.decision_pros} decisionCons={result.decision_cons} />
+          <VisitInformation items={result.practical_visit_information} />
+          <RecommendedDishes dishes={result.recommended_dishes} />
 
-          <AspectAnalysisList
-            items={result.pros}
-            reviews={reviews}
-            type="pros"
-          />
-
-          <AspectAnalysisList
-            items={result.cons}
-            reviews={reviews}
-            type="cons"
-          />
-
-          {/* 第三層：進階資訊 */}
-          <SectionHeading
-            label="ADVANCED INSIGHTS"
-            title="更多分析資訊"
-          />
+          <section className="border-t border-lumora-border pt-4">
+            <h2 className="font-semibold">深入評論分析</h2>
+            <div className="mt-3 space-y-4">
+              <AspectAnalysisList items={result.pros} reviews={reviews} type="pros" />
+              <AspectAnalysisList items={result.cons} reviews={reviews} type="cons" />
+            </div>
+          </section>
 
           <AspectRatingBars scores={result.aspect_scores} />
+
+          <footer className="border-t border-lumora-border pt-4">
+            <h2 className="text-sm font-semibold">分析資訊</h2>
+            <dl className="mt-2 space-y-1 text-xs leading-5 text-lumora-secondary">
+              <div className="flex gap-2">
+                <dt className="shrink-0">分析模式</dt>
+                <dd>{result.analysis_mode === "mock" ? "MOCK MODE（模擬分析）" : result.analysis_mode === "gemini" ? "GEMINI MODE" : "未記錄"}</dd>
+              </div>
+              {result.analysis_mode === "gemini" && (
+                <div className="flex gap-2">
+                  <dt className="shrink-0">Gemini 模型</dt>
+                  <dd className="min-w-0 break-words">{result.model_id || "本次未記錄模型名稱"}</dd>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <dt className="shrink-0">資料範圍</dt>
+                <dd>本次納入分析的文字評論。{task?.newest === false && "採用目前評論順序。"}</dd>
+              </div>
+            </dl>
+          </footer>
         </div>
       )}
     </main>
