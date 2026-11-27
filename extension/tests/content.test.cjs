@@ -24,9 +24,43 @@ const compiled = new Map(["content", "review-ownership", "maps-context", "analys
   }).outputText,
 ]));
 
+test("normalizes review fields without truncating identifiers", async () => {
+  const id = "😀".repeat(256);
+  const page = setup(fixtureTabs, title, {
+    reviewIds: [id + "x", id], reviewText: "😀".repeat(5001), relativeTime: "週".repeat(129),
+  });
+  const response = await page.collect();
+  assert.equal(response.ok, true);
+  assert.equal(response.data.reviews.length, 1);
+  assert.equal(response.data.reviews[0].review_id, id);
+  assert.equal(response.data.reviews[0].text, "😀".repeat(5000));
+  assert.equal(response.data.reviews[0].relative_time, "週".repeat(128));
+});
+
+test("caps the serialized UTF-8 payload without dropping or reordering reviews", async () => {
+  const ids = Array.from({ length: 50 }, (_, index) => `review-${index}`);
+  const page = setup(fixtureTabs, title, { reviewIds: ids, reviewText: "😀".repeat(5000) });
+  const response = await page.collect();
+  assert.equal(response.ok, true);
+  const data = JSON.parse(JSON.stringify(response.data));
+  assert.deepEqual(data.reviews.map((review) => review.review_id), ids);
+  assert.ok(new TextEncoder().encode(JSON.stringify(data)).byteLength <= 512 * 1024);
+  const length = Array.from(data.reviews[0].text).length;
+  assert.ok(length > 0 && length < 5000);
+  assert.ok(data.reviews.every((review) => review.text === "😀".repeat(length)));
+});
+
+test("rejects an oversized place ID without attempting to collect reviews", async () => {
+  const oversized = "0x" + "a".repeat(507) + ":0x1";
+  const page = setup(fixtureTabs, title, { fixturePlaceId: oversized, cardCount: 1 });
+  const response = await page.collect(oversized);
+  assert.equal(response.ok, false);
+  assert.equal(response.errorCode, "PLACE_ID_TOO_LONG");
+});
+
 function setup(tabs, heading = title, {
   cardCount = 0, sortLabel, debug = false, fixturePlaceId = placeId, deferReviewDom = false,
-  scrollReviews = false, initialScrollTop = 0,
+  scrollReviews = false, initialScrollTop = 0, reviewText, relativeTime, reviewIds,
 } = {}) {
   class ElementFixture {
     constructor(role) {
@@ -58,7 +92,8 @@ function setup(tabs, heading = title, {
     }
     querySelector(selector) {
       if (this.role === "card" && selector.startsWith("span[role")) return { getAttribute: () => "5 顆星" };
-      if (this.role === "card" && selector === ".wiI7pd") return { textContent: "Review " + this.getAttribute("data-review-id") };
+      if (this.role === "card" && selector === ".wiI7pd") return { textContent: reviewText ?? "Review " + this.getAttribute("data-review-id") };
+      if (this.role === "card" && selector === ".rsqaWe" && relativeTime) return { textContent: relativeTime };
       return selector.startsWith("h1,") ? { textContent: heading } : null;
     }
     querySelectorAll(selector) {
@@ -140,7 +175,7 @@ function setup(tabs, heading = title, {
     return list;
   }
   const loadCards = () => {
-    const ids = Array.from({ length: cardCount }, (_, index) => reviewId(index));
+    const ids = reviewIds ?? Array.from({ length: cardCount }, (_, index) => reviewId(index));
     if (scrollReviews) appendScroller(ids);
     else appendCards(liveMain, ids);
   };
@@ -163,7 +198,7 @@ function setup(tabs, heading = title, {
   const logs = [];
   const location = { href: "https://www.google.com/maps/place/test/data=!1s" + fixturePlaceId };
   const context = {
-    URL, AbortController, clearTimeout, performance,
+    URL, TextEncoder, AbortController, clearTimeout, performance,
     setTimeout: (callback, delay) => setTimeout(callback, [2500, 12000, 3000, 2000, 700].includes(delay) ? 20 : delay),
     console: { debug: (...args) => logs.push(args) },
     location,

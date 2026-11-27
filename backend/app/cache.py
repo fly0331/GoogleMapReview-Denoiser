@@ -4,11 +4,22 @@ import json
 import sqlite3
 import time
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 CACHE_FORMAT_VERSION = 4
+
+
+@dataclass(frozen=True)
+class CacheEntry:
+    place_id: str
+    value: str
+    cached_at: float
+    response: dict[str, Any]
+    analysis_key: str | None
 
 
 def create_fingerprint(payload: dict[str, Any]) -> str:
@@ -66,6 +77,10 @@ class SQLiteCache:
         place_id: str,
         fingerprint: str,
     ) -> dict[str, Any] | None:
+        entry = self.get_entry(place_id, fingerprint)
+        return entry.response if entry else None
+
+    def get_entry(self, place_id: str, fingerprint: str) -> CacheEntry | None:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 "SELECT value, cached_at FROM cache WHERE place_id = ?",
@@ -75,46 +90,48 @@ class SQLiteCache:
         if row is None:
             return None
 
-        cached_at = row[1]
+        value, cached_at = row
         if time.time() - cached_at >= self.ttl_seconds:
-            self.delete(place_id)
+            self._delete_if_unchanged(place_id, value, cached_at)
             return None
 
         try:
-            envelope = json.loads(row[0])
+            envelope = json.loads(value)
         except (json.JSONDecodeError, TypeError):
-            self.delete(place_id)
+            self._delete_if_unchanged(place_id, value, cached_at)
             return None
 
-        if not isinstance(envelope, dict):
-            self.delete(place_id)
-            return None
-
-        if envelope.get("format_version") != CACHE_FORMAT_VERSION:
-            self.delete(place_id)
+        if not isinstance(envelope, dict) or envelope.get("format_version") != CACHE_FORMAT_VERSION:
+            self._delete_if_unchanged(place_id, value, cached_at)
             return None
 
         if envelope.get("fingerprint") != fingerprint:
             return None
 
         response = envelope.get("response")
-        if not isinstance(response, dict):
-            self.delete(place_id)
+        analysis_key = envelope.get("analysis_key")
+        if not isinstance(response, dict) or ("analysis_key" in envelope and not isinstance(analysis_key, str)):
+            self._delete_if_unchanged(place_id, value, cached_at)
             return None
 
-        return response
+        return CacheEntry(place_id, value, cached_at, response, analysis_key)
 
     def set(
         self,
         place_id: str,
         fingerprint: str,
         response: dict[str, Any],
+        *,
+        analysis_key: str | None = None,
     ) -> None:
         envelope = {
             "format_version": CACHE_FORMAT_VERSION,
             "fingerprint": fingerprint,
+            "write_id": uuid4().hex,
             "response": response,
         }
+        if analysis_key is not None:
+            envelope["analysis_key"] = analysis_key
 
         with closing(self._connect()) as connection, connection:
             self._delete_expired(connection)
@@ -128,6 +145,16 @@ class SQLiteCache:
                     json.dumps(envelope, ensure_ascii=False),
                     time.time(),
                 ),
+            )
+
+    def delete_entry(self, entry: CacheEntry) -> None:
+        self._delete_if_unchanged(entry.place_id, entry.value, entry.cached_at)
+
+    def _delete_if_unchanged(self, place_id: str, value: str, cached_at: float) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "DELETE FROM cache WHERE place_id = ? AND value = ? AND cached_at = ?",
+                (place_id, value, cached_at),
             )
 
     def delete(self, place_id: str) -> None:

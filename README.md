@@ -55,7 +55,7 @@ flowchart TD
 
 
 
-The backend selects up to 50 text-bearing reviews and 20,000 review-text characters. It deduplicates review IDs and applies a deterministic budget using review IDs. A cache miss with eligible reviews triggers one Gemini request; a cache hit reuses the result. Practical information is returned only when its source can be checked against the selected reviews.
+The backend selects up to 50 text-bearing reviews and 20,000 review-text characters. It deduplicates review IDs and applies a deterministic budget using review IDs. Concurrent misses with the same analysis key share one in-flight result and, when eligible, one Gemini call. Practical information is returned only when its source can be checked against the selected reviews.
 
 ## Tech Stack | 技術架構
 
@@ -140,13 +140,41 @@ $env:MOCK_LLM="true"
 Start the backend:
 
 ```powershell
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --no-proxy-headers
 ```
 
 Backend API:
 
 - Health Check: `http://127.0.0.1:8000/health`
 - API Endpoint: `POST http://127.0.0.1:8000/api/v1/analyze`
+
+#### API Protection | API 防護
+
+| 環境變數 | 預設 | 用途 |
+| --- | --- | --- |
+| `FORWARDED_ALLOW_IPS` | 空白 | 使用 `python -m app.serve` 時，只有列出的代理 IP 或 CIDR 可以讓 Uvicorn 解析轉送標頭。空白時使用直接連線來源。 |
+| `RATE_LIMIT_REQUESTS` | `5` | 每個用戶端在滑動時間窗內可送出的分析請求數。 |
+| `RATE_LIMIT_WINDOW` | `60` | 限流窗的秒數。 |
+| `RATE_LIMIT_MAX_CLIENTS` | `10000` | 單一程序保留的用戶端計數上限。滿載時拒絕新的用戶端計數，並定期清理過期紀錄。 |
+| `MAX_REQUEST_BODY_BYTES` | `524288` | API 分析請求的 HTTP body bytes 上限。 |
+| `GEMINI_DAILY_CALL_LIMIT` | `100` | 每個 SQLite 檔案的每日 Gemini 呼叫保留次數，於 UTC 午夜重置。 |
+| `GEMINI_CONCURRENT_CALL_LIMIT` | `2` | 同一程序中實際執行的 Gemini 呼叫上限。 |
+| `GEMINI_MAX_REQUEST_BYTES` | `262144` | Gemini 請求 JSON 的應用程式端 UTF-8 預算，包含 prompt、評論、ID、Schema 及結構開銷。 |
+| `GEMINI_MAX_OUTPUT_TOKENS` | `4096` | 透過 Interactions API 設定的模型輸出 token 上限。 |
+
+分析 API 接收最多 50 則評論。Place ID、Review ID、相對時間及評論正文分別最多 512、256、128、5,000 個 Unicode 字元。Extension 會縮短過長的正文與相對時間。過長的 Review ID 會排除，過長的 Place ID 會拒絕。若整批 JSON 仍超過 512 KiB，Extension 將使用相同的正文上限縮短各則評論。評論順序與有效 ID 保留，側欄原文使用送出的版本。直接 API 呼叫須符合欄位限制。若伺服器設定的 body 上限低於 Extension 的傳輸上限，伺服器可能回傳 `413 REQUEST_BODY_TOO_LARGE`。
+
+部署目標為單 instance、單 worker。入口 `python -m app.serve` 固定啟動一個 worker，instance 數在 Render 設定。須先確認 Render 的直連代理範圍、代理如何處理 `X-Forwarded-For`，以及不同外部使用者是否得到獨立的限流身分，再配置可信代理。若未配置，應用程式會將代理的連線 IP 當作來源，經由同一代理的請求可能共用限流。來源設定及 CORS 不提供 API 身分驗證。
+
+SQLite 每日額度寫入 `DATABASE_PATH` 所指檔案的獨立資料表。Render 須將該路徑放到持久磁碟的掛載目錄，暫存磁碟重啟或重新部署可能失去額度狀態。Per-client 限流與 Gemini 併發席位是程序內狀態，多 worker 會分開計數，不同 replica 的 SQLite 檔案也各自計數。擴展前應在共享入口執行限流，並選用能原子保留每日額度及管理全站併發席位的共享儲存。
+
+Cache hit、Mock Mode 與無可分析評論皆不保留配額。已保留的實際模型呼叫次數不因逾時、取消或供應商錯誤退回。20,000 字元正文預算、UTF-8 bytes、輸出 token 與每日呼叫量是不同的限制。提供者可能計入模型思考等用量，這些設定無法換算為精確金額上限。
+
+#### Single-flight and SQLite concurrency | 分析協調與快取一致性
+
+Single-flight 使用完整評論請求指紋、分析模式、指定模型、Prompt 雜湊、快取格式及模型預算組成分析 key。程序同時最多登記 16 個 leader 與 16 個等待者，等待者最多等 45 秒。登記後 leader 會重查快取。連線中斷或等待逾時只影響該次 HTTP 請求。已開始的模型呼叫會繼續到完成或 SDK 逾時，並依既有額度規則釋放席位。共用新結果仍回傳 `cache_hit: false`。若 leader 重查時已讀到 SQLite 資料，所有收到該快取結果的請求均回傳 `cache_hit: true`。
+
+SQLite 保留每個 Place ID 一筆、七天 TTL 及 v4 格式。不同輸入可各自完成，最後成功提交的寫入保留在資料庫，後續讀取仍須比對完整指紋與分析 key。舊 v4 只在回應可驗證且記錄的模式與模型相符時重用。缺少模型資訊的 Gemini 舊快取會在下一次分析時更新。移除過期或壞資料時會核對原先讀到的資料版本。Single-flight 限於同一程序，服務重啟會遺失進行中協調狀態。多 worker 或 replica 需要共享協調機制，SQLite 共用檔案也無法提供跨程序 Single-flight。
 
 ### 2. Extension Setup | 擴充功能設定
 

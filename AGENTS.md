@@ -7,7 +7,7 @@
 
 ## 2. Extension 開發規範 (`extension/`)
 * **DOM 擷取**：禁止依賴混淆 CSS Class（如 `.jftiEf`），優先使用 `data-review-id`、`aria-label` 等語意屬性。
-* **擷取流程**：先切換「最新（Newest）」排序 → 節流自動捲動（上限 120 則並防無窮迴圈）→ 展開「全文 / More」按鈕。
+* **擷取流程**：先切換「最新（Newest）」排序 → 節流自動捲動（上限 50 則並防無窮迴圈）→ 展開「全文 / More」按鈕。
 * **店家 ID**：從網址擷取 `!1s(0x[0-9a-f]+:0x[0-9a-f]+)` 作為 `place_id`。
 * **權限最小化**：`manifest.json` 僅申請 `activeTab`、`sidePanel`、`storage` 與 Google Maps host permissions。
 

@@ -12,11 +12,14 @@ def normalize_aware_datetime(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+MAX_REVIEW_TEXT_CHARS = 5_000
+
+
 class ReviewInput(BaseModel):
-    review_id: str
+    review_id: str = Field(max_length=256)
     rating: int = Field(ge=1, le=5)
-    text: str = Field(default="", max_length=5000)
-    relative_time: str | None = None
+    text: str = Field(default="", max_length=MAX_REVIEW_TEXT_CHARS)
+    relative_time: str | None = Field(default=None, max_length=128)
     author_reviews_count: int | None = Field(default=None, ge=0)
     review_date: datetime | None = None
 
@@ -32,8 +35,8 @@ class ReviewInput(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    place_id: str = Field(min_length=1, max_length=256)
-    reviews: list[ReviewInput] = Field(max_length=120)
+    place_id: str = Field(min_length=1, max_length=512)
+    reviews: list[ReviewInput] = Field(max_length=50)
     scraped_at: datetime
 
     @field_validator("scraped_at")

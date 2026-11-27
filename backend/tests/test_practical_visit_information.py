@@ -112,7 +112,7 @@ def test_mock_visit_information_uses_input_only_and_omits_conflicts(monkeypatch)
     gemini.assert_not_called()
 
 
-@pytest.mark.parametrize(("count", "length", "expected"), [(60, 300, 50), (6, 4900, 4)])
+@pytest.mark.parametrize(("count", "length", "expected"), [(50, 300, 50), (6, 4900, 4)])
 def test_api_passes_only_budgeted_unique_nonblank_reviews(client, monkeypatch, count, length, expected):
     analyze = Mock(return_value=LLMABSAOutput(decision_pros="", decision_cons=""))
     monkeypatch.setattr(main, "analyze_reviews", analyze)
@@ -120,10 +120,12 @@ def test_api_passes_only_budgeted_unique_nonblank_reviews(client, monkeypatch, c
         ReviewInput(review_id=f"r{index}", rating=index % 5 + 1, text="五星送小菜".ljust(length, "文"))
         for index in range(count)
     ]
+    if count < 50:
+        reviews.extend([reviews[0], ReviewInput(review_id="blank", rating=5, text="  ")])
     request = AnalyzeRequest(
         place_id="budget-limit",
         scraped_at="2026-11-25T00:00:00Z",
-        reviews=[*reviews, reviews[0], ReviewInput(review_id="blank", rating=5, text="  ")],
+        reviews=reviews,
     )
 
     result = main.analyze(request)

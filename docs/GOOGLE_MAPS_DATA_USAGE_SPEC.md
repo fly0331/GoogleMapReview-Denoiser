@@ -30,7 +30,7 @@ The intended product is free to use, with no advertisements, subscription fees, 
 | `place_id` | Place identifier parsed from the Google Maps page URL | Backend cache key and request context |
 | `review_id` | Review identifier from the review card's `data-review-id` attribute | Deduplication, evidence linking, Gemini input |
 | `rating` | Star rating parsed from an accessibility label | Gemini input and original review display |
-| `text` | Review text displayed in the review card after expansion | Review selection, Gemini input, and evidence display |
+| `text` | Expanded review text, capped at 5,000 Unicode characters and shortened further when required by the request budget | Review selection, Gemini input, and evidence display use the transmitted text |
 | `relative_time` | Relative date text displayed in the review card | Original review display |
 | `author_reviews_count` | Review count shown for the review author, when parseable | Retained in the request and fingerprint; not used for selection |
 | `review_date` | Absolute review date field | Currently always set to `null` by the content script |
@@ -77,7 +77,7 @@ The Gemini input contains only:
 
 It does not include the `place_id`, `scraped_at`, `relative_time`, `author_reviews_count`, or `review_date` fields in the inspected implementation.
 
-The implementation limits a Gemini request to 50 eligible reviews and 20,000 total review-text characters. It uses an ID-based deterministic order to allocate the budget and skips reviews that do not fit; review text is not truncated. The configured model defaults to `gemini-3.5-flash-lite`, and the API key is read by the backend from `GEMINI_API_KEY`; it is not embedded in the extension code.
+The extension checks the complete serialized request against a 512 KiB UTF-8 budget and applies a uniform character cap to review texts when needed. Review identifiers are kept intact. The backend allocates the Gemini selection budget in a deterministic ID-based order and skips reviews that do not fit the 50-review and 20,000 review-text character limits. It separately checks the serialized Gemini request size and configures an output token cap. The configured model defaults to `gemini-3.5-flash-lite`, and the API key is read by the backend from `GEMINI_API_KEY`; it is not embedded in the extension code.
 
 The actual Gemini account tier, applicable service terms, retention settings, and data-use settings are operational/account facts and cannot be established from repository code. They must be verified before release.
 

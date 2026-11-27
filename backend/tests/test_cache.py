@@ -1,6 +1,8 @@
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
@@ -155,3 +157,43 @@ def test_old_envelopes_miss_and_v4_envelope_can_be_read(cache_path, legacy_versi
     with cache._connect() as connection:
         row = connection.execute("SELECT value FROM cache WHERE place_id = ?", ("p1",)).fetchone()
     assert json.loads(row[0])["format_version"] == 4
+
+
+@pytest.mark.parametrize("old", ["malformed", "expired", "invalid-response"])
+def test_conditional_eviction_leaves_a_concurrent_new_write(cache_path, monkeypatch, old):
+    cache = SQLiteCache(cache_path, ttl_seconds=60)
+    with cache._connect() as connection:
+        connection.execute("INSERT INTO cache(place_id, value, cached_at) VALUES (?, ?, ?)", (
+            "p1", "{invalid" if old == "malformed" else json.dumps({
+                "format_version": 4, "fingerprint": "old", "response": {},
+            }), time.time() - (120 if old == "expired" else 0),
+        ))
+
+    ready, resume = Event(), Event()
+    delete = cache._delete_if_unchanged
+
+    def pause_before_delete(*args):
+        ready.set()
+        assert resume.wait(5)
+        delete(*args)
+
+    def read_invalid():
+        entry = cache.get_entry("p1", "old")
+        if old == "invalid-response":
+            assert entry is not None and entry.response == {}
+            cache.delete_entry(entry)
+        else:
+            assert entry is None
+
+    monkeypatch.setattr(cache, "_delete_if_unchanged", pause_before_delete)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        stale_reader = pool.submit(read_invalid)
+        try:
+            assert ready.wait(5)
+            cache.set("p1", "new", {"analyzed_count": 7})
+        finally:
+            resume.set()
+        stale_reader.result(timeout=5)
+
+    assert cache.get("p1", "old") is None
+    assert cache.get("p1", "new") == {"analyzed_count": 7}

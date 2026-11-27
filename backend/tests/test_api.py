@@ -105,14 +105,14 @@ def test_same_request_still_uses_cache(client):
 
 def test_analyzed_count_excludes_empty_review_text(monkeypatch):
     cache = Mock()
-    cache.get.return_value = None
+    cache.get_entry.return_value = None
     monkeypatch.setattr(main, "cache", cache)
 
     # Keep the LLM isolated from external providers.
     monkeypatch.setattr(
         main,
         "analyze_reviews",
-        lambda reviews: LLMABSAOutput(decision_pros="", decision_cons=""),
+        lambda reviews, **settings: LLMABSAOutput(decision_pros="", decision_cons=""),
     )
 
     test_payload = payload()
@@ -137,7 +137,10 @@ def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
 
     # Simulate a cache entry that is a dict but does not
     # satisfy the AnalyzeResponse schema.
-    cache.get.return_value = {}
+    from app.cache import CacheEntry
+
+    invalid = CacheEntry("place", "{}", 1.0, {}, None)
+    cache.get_entry.side_effect = [invalid, None]
 
     monkeypatch.setattr(main, "cache", cache)
     monkeypatch.setenv("MOCK_LLM", "true")
@@ -146,7 +149,7 @@ def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
     monkeypatch.setattr(
         main,
         "analyze_reviews",
-        lambda reviews: LLMABSAOutput(decision_pros="", decision_cons=""),
+        lambda reviews, **settings: LLMABSAOutput(decision_pros="", decision_cons=""),
     )
 
     request = AnalyzeRequest.model_validate(payload())
@@ -154,7 +157,7 @@ def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
     response = main.analyze(request)
 
     # Invalid cache should be deleted.
-    cache.delete.assert_called_once_with(request.place_id)
+    cache.delete_entry.assert_called_once_with(invalid)
 
     # The request should be recomputed instead of raising
     # a Pydantic ValidationError.
@@ -167,13 +170,13 @@ def test_invalid_cached_response_is_treated_as_cache_miss(monkeypatch):
 
 def test_analysis_mode_mock(monkeypatch):
     cache = Mock()
-    cache.get.return_value = None
+    cache.get_entry.return_value = None
     monkeypatch.setattr(main, "cache", cache)
     monkeypatch.setenv("MOCK_LLM", "true")
     monkeypatch.setattr(
         main,
         "analyze_reviews",
-        lambda reviews: LLMABSAOutput(decision_pros="", decision_cons=""),
+        lambda reviews, **settings: LLMABSAOutput(decision_pros="", decision_cons=""),
     )
 
     request = AnalyzeRequest.model_validate(payload())
@@ -184,13 +187,13 @@ def test_analysis_mode_mock(monkeypatch):
 
 def test_analysis_mode_gemini(monkeypatch):
     cache = Mock()
-    cache.get.return_value = None
+    cache.get_entry.return_value = None
     monkeypatch.setattr(main, "cache", cache)
     monkeypatch.setenv("MOCK_LLM", "false")
     monkeypatch.setattr(
         main,
         "analyze_reviews",
-        lambda reviews: LLMABSAOutput(decision_pros="", decision_cons=""),
+        lambda reviews, **settings: LLMABSAOutput(decision_pros="", decision_cons=""),
     )
 
     request = AnalyzeRequest.model_validate(payload())
@@ -199,21 +202,23 @@ def test_analysis_mode_gemini(monkeypatch):
     assert response.analysis_mode == "gemini"
 
 
-def test_cache_hit_preserves_original_analysis_mode(client, monkeypatch):
+def test_cache_hits_require_the_same_analysis_mode(client, monkeypatch):
     monkeypatch.setenv("MOCK_LLM", "true")
 
     request = AnalyzeRequest.model_validate(payload())
 
     first_response = main.analyze(request)
     assert first_response.analysis_mode == "mock"
+    assert main.analyze(request).cache_hit is True
 
     # Change environment after the first analysis.
     monkeypatch.setenv("MOCK_LLM", "false")
+    monkeypatch.setattr(main, "analyze_reviews", Mock(return_value=LLMABSAOutput(decision_pros="", decision_cons="")))
 
     second_response = main.analyze(request)
 
-    assert second_response.cache_hit is True
-    assert second_response.analysis_mode == "mock"
+    assert second_response.cache_hit is False
+    assert second_response.analysis_mode == "gemini"
     assert second_response.model_id is None
 
 
@@ -246,7 +251,6 @@ def test_gemini_model_metadata_is_cached_with_the_result(client, monkeypatch, re
 
     request = AnalyzeRequest.model_validate(payload())
     first = main.analyze(request)
-    monkeypatch.setenv("GEMINI_MODEL", "requested-model-b")
     second = main.analyze(request)
 
     assert first.cache_hit is False
@@ -258,12 +262,17 @@ def test_gemini_model_metadata_is_cached_with_the_result(client, monkeypatch, re
     assert create.call_args.kwargs["model"] == "requested-model-a"
     assert "model_id" not in create.call_args.kwargs["response_format"]["schema"]["properties"]
 
+    monkeypatch.setenv("GEMINI_MODEL", "requested-model-b")
+    third = main.analyze(request)
+    assert third.cache_hit is False
+    assert create.call_count == 2
+    assert create.call_args.kwargs["model"] == "requested-model-b"
 
-def test_legacy_v4_cache_without_model_id_is_reused(client, monkeypatch):
+
+def test_legacy_v4_mock_cache_without_model_id_is_reused(client, monkeypatch):
     request = AnalyzeRequest.model_validate(payload())
     legacy_response = main.analyze(request).model_dump(mode="json")
     legacy_response.pop("model_id")
-    legacy_response["analysis_mode"] = "gemini"
     fingerprint = create_fingerprint({
         "place_id": request.place_id,
         "reviews": [review.model_dump(mode="json") for review in request.reviews],
@@ -276,7 +285,7 @@ def test_legacy_v4_cache_without_model_id_is_reused(client, monkeypatch):
     response = main.analyze(request)
 
     assert response.cache_hit is True
-    assert response.analysis_mode == "gemini"
+    assert response.analysis_mode == "mock"
     assert response.model_id is None
     analyze_reviews.assert_not_called()
 
@@ -298,12 +307,12 @@ def test_llm_error_returns_standard_error_response(monkeypatch):
     from app.services.llm_absa import LLMTimeoutError
 
     cache = Mock()
-    cache.get.return_value = None
+    cache.get_entry.return_value = None
     monkeypatch.setattr(main, "cache", cache)
     monkeypatch.setattr(
         main,
         "analyze_reviews",
-        lambda reviews: (_ for _ in ()).throw(LLMTimeoutError()),
+        lambda reviews, **settings: (_ for _ in ()).throw(LLMTimeoutError()),
     )
 
     response = TestClient(main.app).post(
@@ -322,8 +331,8 @@ def test_llm_error_returns_standard_error_response(monkeypatch):
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("place_id", "p" * 257),
-        ("reviews", [{}] * 121),
+        ("place_id", "p" * 513),
+        ("reviews", [payload()["reviews"][0]] * 51),
     ],
 )
 def test_analyze_request_rejects_oversized_fields(field, value):
@@ -338,5 +347,15 @@ def test_review_text_rejects_more_than_5000_characters():
     test_payload = payload()
     test_payload["reviews"][0]["text"] = "a" * 5001
 
+    with pytest.raises(ValidationError):
+        AnalyzeRequest.model_validate(test_payload)
+
+
+@pytest.mark.parametrize("field,limit", [("review_id", 256), ("relative_time", 128), ("text", 5000)])
+def test_review_input_limits_count_unicode_characters(field, limit):
+    test_payload = payload()
+    test_payload["reviews"][0][field] = "😀" * limit
+    AnalyzeRequest.model_validate(test_payload)
+    test_payload["reviews"][0][field] += "😀"
     with pytest.raises(ValidationError):
         AnalyzeRequest.model_validate(test_payload)

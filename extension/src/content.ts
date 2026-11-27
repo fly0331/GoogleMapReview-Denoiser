@@ -29,6 +29,19 @@ interface CollectionResult {
 const CARD_SELECTOR = '[data-review-id]';
 const SCROLL_DELAY = 700;
 const MAX_IDLE_ROUNDS = 4;
+const MAX_REVIEW_TEXT_CHARS = 5_000;
+const MAX_REVIEW_ID_CHARS = 256;
+const MAX_RELATIVE_TIME_CHARS = 128;
+const MAX_PLACE_ID_CHARS = 512;
+const MAX_REQUEST_BODY_BYTES = 512 * 1024;
+
+function truncateText(text: string, limit: number): string {
+    return text.length <= limit ? text : Array.from(text).slice(0, limit).join("").trimEnd();
+}
+
+function exceedsCharacterLimit(text: string, limit: number): boolean {
+    return text.length > limit && Array.from(text).length > limit;
+}
 
 function parseAuthorReviewsCount(card: Element): number | null {
     const text = card.querySelector(".RfnDt")?.textContent ?? "";
@@ -65,7 +78,7 @@ function parseRating(card: Element): number | null {
 function extractReview(card: Element): ReviewData | null {
     const reviewId = card.getAttribute("data-review-id");
 
-    if (!reviewId) return null;
+    if (!reviewId || exceedsCharacterLimit(reviewId, MAX_REVIEW_ID_CHARS)) return null;
 
     const rating = parseRating(card);
     if (rating === null) return null;
@@ -79,11 +92,38 @@ function extractReview(card: Element): ReviewData | null {
     return {
         review_id: reviewId,
         rating,
-        text,
-        relative_time: relativeTime || null,
+        text: truncateText(text, MAX_REVIEW_TEXT_CHARS),
+        relative_time: relativeTime ? truncateText(relativeTime, MAX_RELATIVE_TIME_CHARS) : null,
         author_reviews_count: parseAuthorReviewsCount(card),
         review_date: null,
     };
+}
+
+function fitRequestBody(request: CollectionResult): CollectionResult {
+    const encoder = new TextEncoder();
+    const fits = (data: CollectionResult) => encoder.encode(JSON.stringify(data)).byteLength <= MAX_REQUEST_BODY_BYTES;
+    if (fits(request)) return request;
+
+    // Apply the largest uniform text cap that fits without reordering or dropping review IDs.
+    let low = 0;
+    let high = MAX_REVIEW_TEXT_CHARS - 1;
+    const withTextCap = (limit: number): CollectionResult => ({
+        ...request,
+        reviews: request.reviews.map((review) => ({ ...review, text: truncateText(review.text, limit) })),
+    });
+    let result = withTextCap(0);
+    if (!fits(result)) throw new CollectionFailure("REQUEST_BODY_TOO_LARGE", "評論資料超過傳輸上限。");
+    while (low <= high) {
+        const limit = Math.floor((low + high) / 2);
+        const candidate = withTextCap(limit);
+        if (fits(candidate)) {
+            result = candidate;
+            low = limit + 1;
+        } else {
+            high = limit - 1;
+        }
+    }
+    return result;
 }
 
 function getReviewCards(root: HTMLElement): Element[] {
@@ -249,11 +289,11 @@ async function collectReviews(
         throw new CollectionFailure("PLACE_ID_MISMATCH", "地標已變更，已停止擷取。");
     }
 
-    return {
+    return fitRequestBody({
         place_id: placeId,
         scraped_at: new Date().toISOString(),
         reviews: [...collected.values()].slice(0, MAX_REVIEWS),
-    };
+    });
 }
 
 function observeUntil<T>(
@@ -366,6 +406,9 @@ async function prepareAndCollect(
     request: CollectionRequest, signal: AbortSignal, debug: boolean, onVerified: (title: string) => void,
 ): Promise<CollectionResponse> {
     const { placeId, requestId } = request;
+    if (exceedsCharacterLimit(placeId, MAX_PLACE_ID_CHARS)) {
+        throw new CollectionFailure("PLACE_ID_TOO_LONG", "這間商家的識別資料超出分析上限。");
+    }
     const ensureRequestedPlace = () => {
         signal.throwIfAborted();
         if (getMapsPlaceId(location.href) !== placeId) {

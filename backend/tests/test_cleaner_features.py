@@ -138,7 +138,7 @@ def test_api_selection_is_independent_of_shadow_comparison(client, sample_review
     }
     llm_inputs = []
 
-    def fake_analyze(reviews):
+    def fake_analyze(reviews, **settings):
         llm_inputs.append([review.review_id for review in reviews])
         return LLMABSAOutput(decision_pros="", decision_cons="")
 

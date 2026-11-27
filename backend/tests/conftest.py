@@ -7,6 +7,13 @@ import pytest
 os.environ["DATABASE_PATH"] = str(Path(gettempdir()) / "review-denoiser-pytest-import.sqlite3")
 from app import main
 from app.cache import SQLiteCache
+from app.services import llm_absa
+from app.services.gemini_limits import GeminiLimits
+
+
+@pytest.fixture(autouse=True)
+def isolate_gemini_quota(tmp_path, monkeypatch):
+    monkeypatch.setattr(llm_absa, "gemini_limits", GeminiLimits(tmp_path / "quota.sqlite3", 100, 2))
 
 @pytest.fixture
 def cache_path(tmp_path):
