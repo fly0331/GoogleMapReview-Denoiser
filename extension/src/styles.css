@@ -4,13 +4,51 @@
 
 @layer base {
   body {
-    @apply bg-lumora-cloud text-lumora-midnight;
+    @apply bg-lumora-paper text-lumora-ink;
     font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   }
 
   button:focus-visible,
+  a:focus-visible,
   summary:focus-visible {
-    @apply outline outline-2 outline-offset-2 outline-lumora-action;
+    @apply outline outline-2 outline-offset-2 outline-lumora-iris;
+  }
+}
+
+@layer components {
+  .lumora-primary {
+    @apply min-h-9 rounded-full bg-[#0D0D0D] px-4 py-2 text-sm font-medium text-white;
+    @apply hover:bg-lumora-ink active:bg-[#383835] motion-safe:transition-colors motion-safe:duration-150;
+    @apply disabled:cursor-not-allowed disabled:bg-lumora-border disabled:text-lumora-ink/70;
+  }
+
+  .lumora-welcome {
+    margin-top: clamp(2rem, 8vw, 3.625rem);
+  }
+
+  .lumora-welcome-title {
+    @apply font-bold;
+    margin-top: clamp(1rem, 3.25vw, 1.5rem);
+    font-size: clamp(2rem, 9.3vw, 4.25rem);
+    line-height: 1.27;
+  }
+
+  .lumora-welcome-copy {
+    margin-top: clamp(1.25rem, 3.2vw, 1.5rem);
+  }
+
+  .lumora-welcome-features {
+    @apply border-t border-lumora-border;
+    margin-top: clamp(2rem, 6.6vw, 3rem);
+    padding-top: clamp(1rem, 3vw, 1.375rem);
+  }
+
+  .lumora-result-section {
+    @apply border-t border-lumora-border pt-5 min-[600px]:pt-6;
+  }
+
+  .lumora-summary-note {
+    @apply border-l-2 pb-4 pl-3;
   }
 }
 

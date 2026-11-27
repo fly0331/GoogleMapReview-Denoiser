@@ -5,13 +5,14 @@ export default {
     extend: {
       colors: {
         lumora: {
-          midnight: "#0F172A",
-          violet: "#8B5CF6",
-          lavender: "#C4B5FD",
-          cloud: "#F8FAFC",
-          action: "#7C3AED",
-          secondary: "#64748B",
-          border: "#E2E8F0",
+          paper: "#FCFBF8",
+          ink: "#20201E",
+          muted: "#686862",
+          iris: "#6941A5",
+          sage: "#526B54",
+          ochre: "#94602D",
+          error: "#913F39",
+          border: "#E6E3DD",
         },
       },
     },

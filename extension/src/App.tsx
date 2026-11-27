@@ -49,9 +49,9 @@ function formatAspect(aspect: string): string {
 }
 
 const ASPECT_SCORE_BANDS = [
-  { minimum: 4, color: "bg-emerald-600", label: "良好", range: "4–5" },
-  { minimum: 3, color: "bg-amber-500", label: "普通", range: "3–<4" },
-  { minimum: 1, color: "bg-red-500", label: "有待改善", range: "1–<3" },
+  { minimum: 4, color: "bg-lumora-sage", label: "良好", range: "4–5" },
+  { minimum: 3, color: "bg-lumora-ochre", label: "普通", range: "3–<4" },
+  { minimum: 1, color: "bg-lumora-error", label: "有待改善", range: "1–<3" },
 ] as const;
 
 function AspectRatingBars({ scores }: { scores?: AnalyzeResponse["aspect_scores"] }) {
@@ -66,14 +66,14 @@ function AspectRatingBars({ scores }: { scores?: AnalyzeResponse["aspect_scores"
       <details className="group">
         <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 rounded-sm">
           <h2 className="font-semibold">各面向評分</h2>
-          <span aria-hidden="true" className="shrink-0 text-xs font-medium text-lumora-action">
+          <span aria-hidden="true" className="shrink-0 text-xs font-medium text-lumora-iris">
             <span className="group-open:hidden">展開查看 ▾</span>
             <span className="hidden group-open:inline">收合 ▴</span>
           </span>
         </summary>
 
         {ratings.length === 0 ? (
-          <p className="mt-4 text-sm text-lumora-secondary">目前沒有可用的面向評分。</p>
+          <p className="mt-4 text-sm text-lumora-muted">目前沒有可用的面向評分。</p>
         ) : (
           <>
             <ul className="mt-4 space-y-3">
@@ -86,18 +86,18 @@ function AspectRatingBars({ scores }: { scores?: AnalyzeResponse["aspect_scores"
                     <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
                       <span className="min-w-0 break-words">{formatAspect(aspect)}</span>
                       <span className="shrink-0 font-medium tabular-nums">
-                        {score} / 5<span className="text-xs text-lumora-secondary"> · {band.label}</span>
+                        {score} / 5<span className="text-xs text-lumora-muted"> · {band.label}</span>
                       </span>
                     </div>
-                    <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-lumora-border">
-                      <div className={`h-full rounded-full ${band.color}`} style={{ width: `${(score / 5) * 100}%` }} />
+                    <div aria-hidden="true" className="h-1 overflow-hidden bg-lumora-border">
+                      <div className={`h-full ${band.color}`} style={{ width: `${(score / 5) * 100}%` }} />
                     </div>
                   </li>
                 );
               })}
             </ul>
 
-            <ul aria-label="評分圖例" className="mt-4 flex flex-wrap gap-x-3 gap-y-1 border-t border-lumora-border/70 pt-3 text-xs text-lumora-secondary">
+            <ul aria-label="評分圖例" className="mt-4 flex flex-wrap gap-x-3 gap-y-1 border-t border-lumora-border/70 pt-3 text-xs text-lumora-muted">
               {ASPECT_SCORE_BANDS.map(({ color, label, range }) => (
                 <li key={label} className="flex items-center gap-1.5">
                   <span aria-hidden="true" className={`h-2 w-2 rounded-full ${color}`} />
@@ -125,7 +125,7 @@ function EvidenceList({
 
   if (evidenceReviews.length === 0) {
     return (
-      <p className="mt-2 text-xs text-lumora-secondary">
+      <p className="mt-2 text-xs text-lumora-muted">
         找不到對應的原始評論。
       </p>
     );
@@ -133,7 +133,7 @@ function EvidenceList({
 
   return (
     <details className="mt-2">
-      <summary className="min-h-6 cursor-pointer rounded-sm text-sm font-medium text-lumora-action hover:underline">
+      <summary className="min-h-6 cursor-pointer rounded-sm text-sm font-medium tabular-nums text-lumora-iris underline-offset-4 hover:underline active:text-lumora-ink">
         查看原始評論（{evidenceReviews.length}）
       </summary>
 
@@ -150,18 +150,18 @@ function EvidenceList({
               key={review.review_id}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="shrink-0 text-xs font-medium text-amber-800">
+                <span className="shrink-0 text-xs font-medium tabular-nums text-lumora-ochre">
                   {review.rating} / 5 分
                 </span>
 
                 {dateLabel && (
-                  <span className="min-w-0 break-words text-xs text-lumora-secondary">
+                  <span className="min-w-0 break-words text-xs text-lumora-muted">
                     {dateLabel}
                   </span>
                 )}
               </div>
 
-              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-lumora-midnight">
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-lumora-ink">
                 {review.text || "此評論沒有文字內容。"}
               </p>
             </div>
@@ -182,9 +182,9 @@ function LineIcon({ path }: { path: string }) {
 }
 
 const progressStages = [
-  { phase: "opening_reviews", label: "確認商家並開啟評論" },
+  { phase: "opening_reviews", label: "確認商家與評論區" },
   { phase: "collecting", label: "擷取評論" },
-  { phase: "analyzing", label: "AI 消費分析" },
+  { phase: "analyzing", label: "整理消費建議" },
 ] as const;
 
 function AnalysisProgress({ task, starting }: { task?: AnalysisTask; starting: boolean }) {
@@ -195,59 +195,68 @@ function AnalysisProgress({ task, starting }: { task?: AnalysisTask; starting: b
   const failed = task?.phase === "failed";
   const collection = phase === "collecting" && !failed ? task?.collectionProgress : undefined;
   return (
-    <div className="mt-3 border-t border-lumora-border pt-3">
-      <ol aria-label="分析階段" className="space-y-2 text-xs">
-        {progressStages.map((stage, index) => (
-          <li
-            key={stage.phase}
-            aria-current={index === current && !failed ? "step" : undefined}
-            className={`flex items-center gap-2 ${index < current ? "text-emerald-700" : index === current ? failed ? "font-semibold text-red-700" : "font-semibold text-lumora-action" : "text-lumora-secondary"}`}
-          >
-            {index < current ? (
-              <><LineIcon path="M4 8l3 3 5-6" /><span className="sr-only">已完成：</span></>
-            ) : (
-              <span aria-hidden="true" className="grid h-4 w-4 shrink-0 place-items-center tabular-nums">{index + 1}</span>
-            )}
-            {stage.label}{index === current && failed && "（未完成）"}
-          </li>
-        ))}
-      </ol>
+    <div className="mt-5 min-[600px]:mt-[27px]">
       {collection?.count !== undefined && (
-        <div className="mt-3">
-          <p className="mb-1 text-xs tabular-nums text-lumora-secondary">已擷取 {collection.count} / {collection.limit} 則</p>
+        <>
+          <div aria-hidden="true" className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <p className="tabular-nums">
+              <span className="text-[clamp(2.25rem,7vw,3.25rem)] font-semibold leading-none">{collection.count}</span>
+              <span className="ml-1.5 text-base text-lumora-muted">/ {collection.limit}</span>
+            </p>
+            <span className="text-xs text-lumora-iris">擷取評論中</span>
+          </div>
           <div
             role="progressbar"
             aria-label="評論擷取進度"
             aria-valuemin={0}
             aria-valuemax={collection.limit}
             aria-valuenow={collection.count}
-            className="h-1.5 overflow-hidden rounded-full bg-lumora-border"
+            aria-valuetext={`${collection.count} / ${collection.limit} 則`}
+            className="h-[3px] overflow-hidden bg-lumora-border"
           >
-            <div className="h-full rounded-full bg-lumora-action motion-safe:transition-[width]" style={{ width: `${(collection.count / collection.limit) * 100}%` }} />
+            <div className="h-full bg-lumora-iris motion-safe:transition-[width]" style={{ width: `${(collection.count / collection.limit) * 100}%` }} />
           </div>
-        </div>
+        </>
       )}
       {phase === "analyzing" && !failed && (
-        <div role="progressbar" aria-label="正在分析評論，完成時間未定" className="mt-3 h-1.5 overflow-hidden rounded-full bg-lumora-border">
-          <div className="lumora-indeterminate h-full w-1/3 rounded-full bg-lumora-action" />
+        <div role="progressbar" aria-label="正在分析評論，完成時間未定" className="h-[3px] overflow-hidden bg-lumora-border">
+          <div className="lumora-indeterminate h-full w-1/3 bg-lumora-iris" />
         </div>
       )}
+      <ol aria-label="分析階段" className="mt-2 text-sm leading-5">
+        {progressStages.map((stage, index) => (
+          <li
+            key={stage.phase}
+            aria-current={index === current && !failed ? "step" : undefined}
+            className={`flex min-h-9 items-center gap-2 min-[600px]:min-h-[42px] ${index > current ? "text-lumora-muted" : index === current && failed ? "text-lumora-error" : ""}`}
+          >
+            {index < current ? (
+              <><span className="text-lumora-sage"><LineIcon path="M4 8l3 3 5-6" /></span><span className="sr-only">已完成：</span></>
+            ) : (
+              <span aria-hidden="true" className={`grid h-4 w-4 shrink-0 place-items-center ${index === current ? failed ? "text-lumora-error" : "text-lumora-iris" : "text-lumora-muted/60"}`}>
+                <span className={`h-3 w-3 rounded-full ${index === current ? "border border-current" : "bg-current"}`} />
+              </span>
+            )}
+            {stage.label}{index === current && failed && "（未完成）"}
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
 
 function RecommendedDishes({ dishes }: { dishes?: AnalyzeResponse["recommended_dishes"] }) {
   return (
-    <section className="border-t border-lumora-border pt-4">
-      <h2 className="font-semibold">最推薦餐點</h2>
+    <section className="lumora-result-section">
+      <h2 className="text-lg font-semibold leading-7">值得一試</h2>
       {!dishes?.length ? (
-        <p className="mt-2 text-sm leading-6 text-lumora-secondary">目前評論中沒有足夠明確的餐點推薦資訊。</p>
+        <p className="mt-2 text-sm leading-6 text-lumora-muted">目前評論中沒有足夠明確的餐點推薦資訊。</p>
       ) : (
-        <ol className="mt-2 list-decimal space-y-2 pl-5 marker:font-semibold marker:text-lumora-action">
+        <ol className="mt-3 list-[decimal-leading-zero] space-y-3 pl-8 marker:font-[Georgia] marker:text-xl marker:text-lumora-iris marker:tabular-nums">
           {dishes.map((dish, index) => (
             <li className="pl-1 text-sm" key={dish.name + "-" + index}>
-              <h3 className="break-words font-semibold">{dish.name}</h3>
-              <p className="mt-0.5 break-words leading-6 text-lumora-secondary">{dish.summary}</p>
+              <h3 className="break-words font-medium leading-6">{dish.name}</h3>
+              <p className="mt-0.5 break-words leading-6 text-lumora-muted">{dish.summary}</p>
             </li>
           ))}
         </ol>
@@ -264,19 +273,19 @@ function DecisionSummary({
   decisionCons: string;
 }) {
   return (
-    <section className="rounded-xl bg-lumora-lavender/20 p-4">
-      <h2 className="text-lg font-semibold leading-6">消費決策摘要</h2>
+    <section className="lumora-result-section">
+      <h2 className="text-lg font-semibold leading-7">消費決策摘要</h2>
 
-      <div className="mt-4">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-700"><LineIcon path="M4 8l3 3 5-6" />值得推薦</h3>
-        <p className="mt-1 break-words text-sm leading-6 text-lumora-midnight">
+      <div className="lumora-summary-note mt-3 border-lumora-sage">
+        <h3 className="text-xs font-medium text-lumora-sage">值得推薦</h3>
+        <p className="mt-1 break-words text-sm leading-6 text-lumora-ink">
           {decisionPros || "目前評論資訊不足。"}
         </p>
       </div>
 
-      <div className="mt-4">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-red-700"><LineIcon path="M8 3v6m0 3h.01" />消費前須注意</h3>
-        <p className="mt-1 break-words text-sm leading-6 text-lumora-midnight">
+      <div className="lumora-summary-note mt-3 border-lumora-ochre">
+        <h3 className="text-xs font-medium text-lumora-ochre">消費前須注意</h3>
+        <p className="mt-1 break-words text-sm leading-6 text-lumora-ink">
           {decisionCons || "目前評論資訊不足。"}
         </p>
       </div>
@@ -285,38 +294,32 @@ function DecisionSummary({
 }
 
 
-const visitCategories: Record<VisitInformationCategory, { label: string; icon: string }> = {
-  budget: { label: "消費預算", icon: "M3 5h10v7H3zM3 7h10m-3 3h1" },
-  wait_time: { label: "候位時間", icon: "M8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 2v3l2 1" },
-  reservation: { label: "訂位建議", icon: "M3 5h10v8H3zM5 3v4m6-4v4M3 8h10" },
-  parking: { label: "停車資訊", icon: "M4 13V3h4a3 3 0 0 1 0 6H4" },
-  dining_time_limit: { label: "用餐時間限制", icon: "M8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 2v3l2 1" },
-  payment: { label: "付款方式", icon: "M3 4h10v8H3zM3 7h10" },
-  other: { label: "其他實用資訊", icon: "M8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 4v3m0-5h.01" },
+const visitCategories: Record<VisitInformationCategory, string> = {
+  reservation: "訂位",
+  budget: "預算",
+  wait_time: "候位",
+  parking: "停車",
+  dining_time_limit: "用餐限時",
+  payment: "付款",
+  other: "其他",
 };
 
 function VisitInformation({ items }: { items: PracticalVisitInformation[] }) {
   if (!items?.length) return null;
 
   return (
-    <section>
-      <h2 className="font-semibold">消費實用資訊</h2>
-      <ul className="mt-3 divide-y divide-lumora-border/70">
-        {Object.entries(visitCategories).map(([category, { label, icon }]) =>
+    <section className="lumora-result-section">
+      <h2 className="text-lg font-semibold leading-7">到訪前須知</h2>
+      <dl className="mt-2 text-sm leading-6">
+        {Object.entries(visitCategories).map(([category, label]) =>
           items.filter((item) => item.category === category).map(({ summary }, index) => (
-            <li className="flex items-start gap-3 py-3 first:pt-0" key={category + "-" + index}>
-              <LineIcon path={icon} />
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold">{label}</h3>
-                <p className="mt-1 break-words text-sm leading-6 text-lumora-secondary">{summary}</p>
-              </div>
-            </li>
+            <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-3 py-1.5" key={category + "-" + index}>
+              <dt className="text-lumora-muted">{label}</dt>
+              <dd className="break-words">{summary}</dd>
+            </div>
           ))
         )}
-      </ul>
-      <p className="mt-2 text-xs leading-5 text-lumora-secondary">
-        資訊整理自評論，實際價格與店家政策可能有所變動。
-      </p>
+      </dl>
     </section>
   );
 }
@@ -337,18 +340,14 @@ function AspectAnalysisList({
       (b.evidence_review_ids?.length ?? 0) - (a.evidence_review_ids?.length ?? 0)
   );
 
-  const badgeColor = isPros
-    ? "bg-emerald-50 text-emerald-700"
-    : "bg-red-50 text-red-700";
-
   return (
     <section>
-      <h3 className={isPros ? "text-sm font-semibold text-emerald-700" : "text-sm font-semibold text-red-700"}>
+      <h3 className={isPros ? "text-sm font-semibold text-lumora-sage" : "text-sm font-semibold text-lumora-ochre"}>
         {isPros ? "優點" : "缺點"}
       </h3>
 
       {sortedItems.length === 0 ? (
-        <p className="mt-3 text-sm text-lumora-secondary">
+        <p className="mt-3 text-sm text-lumora-muted">
           {isPros ? "尚無優點分析結果。" : "尚無缺點分析結果。"}
         </p>
       ) : (
@@ -359,17 +358,17 @@ function AspectAnalysisList({
               key={`${item.aspect}-${index}`}
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="min-w-0 break-words text-sm font-semibold text-lumora-midnight">
+                <p className="min-w-0 break-words text-sm font-semibold text-lumora-ink">
                   {formatAspect(item.aspect)}
                 </p>
                 <span
-                  className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${badgeColor}`}
+                  className="shrink-0 text-xs tabular-nums text-lumora-muted"
                 >
                   {item.evidence_review_ids?.length ?? 0} 則佐證
                 </span>
               </div>
 
-              <p className="mt-1 break-words text-sm leading-6 text-lumora-secondary">
+              <p className="mt-1 break-words text-sm leading-6 text-lumora-muted">
                 {item.summary}
               </p>
 
@@ -431,23 +430,6 @@ function describeTaskFailure(task: AnalysisTask): PanelFailure {
     return { message: "目前無法連線到分析服務。請稍後重新分析。", retry: "analysis" };
   }
   return { message: "這次無法完成分析。請稍後重新分析。", retry: "analysis" };
-}
-
-function ExploreIllustration() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 248 112" className="mb-4 block w-full max-w-[288px]">
-      <rect x="1" y="1" width="246" height="110" rx="12" fill="#F2EEFD" />
-      <g fill="none" stroke="#C4B5FD" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 82l46-29 46 14 48-24 39 8 45-26M18 47l39-24 44 13 40-21m-25 88 47-31 46 10 27-17" />
-        <path d="M35 102l-7-30 17-25-9-27m65 16 3 31-17 33m105-86-1 37 18 31-12 20" />
-      </g>
-      <path d="M61 82c20 7 39 6 59-1l25-9" fill="none" stroke="#7C3AED" strokeWidth="1.5" strokeDasharray="2 5" strokeLinecap="round" />
-      <path d="M74 45c0 13-16 28-16 28S42 58 42 45a16 16 0 1 1 32 0Z" fill="#7C3AED" />
-      <circle cx="58" cy="45" r="5" fill="#FFF" />
-      <path d="M142 29h52a7 7 0 0 1 7 7v25a7 7 0 0 1-7 7h-36l-12 9v-9h-4a7 7 0 0 1-7-7V36a7 7 0 0 1 7-7Z" fill="#FFF" stroke="#7C3AED" strokeWidth="1.5" strokeLinejoin="round" />
-      <path d="M149 43h37m-37 10h26" fill="none" stroke="#7C3AED" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 export default function App() {
@@ -583,88 +565,70 @@ export default function App() {
   }, []);
 
   return (
-    <main className="mx-auto min-h-screen max-w-xl px-4 pb-6 pt-5">
-      <header className="flex items-center gap-2.5 border-b border-lumora-border pb-2.5">
-        <img src="/icons/lumora.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
-        <div className="min-w-0">
-          <h1>
-            <img src="/icons/lumora-wordmark.svg" alt="Lumora" width={120} className="block h-auto max-w-full" />
-          </h1>
-          <p lang="en" className="mt-0.5 text-xs leading-4 text-lumora-secondary">A brighter way to choose.</p>
-        </div>
+    <main className="mx-auto min-h-screen max-w-3xl px-4 pb-8 min-[380px]:px-5">
+      <header className="flex h-16 items-center justify-between gap-3 border-b border-lumora-border min-[600px]:h-20">
+        <h1 className="relative -top-0.5 flex min-w-0 items-center gap-2">
+          <img src="/icons/lumora.svg" alt="" width={30} height={30} className="h-[30px] w-[30px] shrink-0" />
+          <img src="/icons/lumora-wordmark.svg" alt="Lumora" width={100} height={23} className="block h-auto max-w-full" />
+        </h1>
+        <span className="shrink-0 text-[0.625rem] text-lumora-muted">消費指南</span>
       </header>
 
       {panel.kind === "unsupported" && (
-        <section className="mt-5">
-          <ExploreIllustration />
-          <h2 className="text-xl font-semibold leading-7">探索下一個好選擇。</h2>
-          <p className="mt-2 text-sm leading-6 text-lumora-secondary">
-            在 Google Maps 找到感興趣的商家，讓 Lumora 為你讀懂評論。
+        <section className="lumora-welcome">
+          <p className="text-xs text-lumora-iris">你的日常消費指南</p>
+          <h2 className="lumora-welcome-title">
+            好的選擇，<br />從了解開始。
+          </h2>
+          <p className="lumora-welcome-copy text-sm leading-6 text-lumora-muted">
+            在 Google Maps 選擇一間商家，Lumora 為你整理評論中值得留意的資訊。
           </p>
           <a
             href="https://www.google.com/maps/"
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-4 flex min-h-10 items-center justify-between gap-2 rounded-lg bg-lumora-action px-4 py-2.5 text-sm font-semibold text-white hover:bg-lumora-action/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lumora-action"
+            className="lumora-primary mt-4 flex items-center justify-center gap-2"
           >
             開啟 Google Maps
             <LineIcon path="M4 12l8-8M6 4h6v6" />
           </a>
-          <ul className="mt-5 divide-y divide-lumora-border border-y border-lumora-border text-sm leading-6">
-            <li className="flex items-start gap-2 py-2.5 text-lumora-midnight">
-              <span className="text-lumora-action"><LineIcon path="M4 3h8v10H4zM6 6h4m-4 3h4" /></span>
-              快速掌握評論重點。
-            </li>
-            <li className="flex items-start gap-2 py-2.5 text-lumora-midnight">
-              <span className="text-lumora-action"><LineIcon path="M8 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" /></span>
-              發現值得推薦的餐點。
-            </li>
-            <li className="flex items-start gap-2 py-2.5 text-lumora-midnight">
-              <span className="text-lumora-action"><LineIcon path="M3 5h10v8H3zM5 3v4m6-4v4M3 8h10" /></span>
-              做好消費前的準備。
-            </li>
-          </ul>
+          <p className="lumora-welcome-features text-xs leading-5 text-lumora-muted">
+            評論摘要 · 推薦餐點 · 到訪資訊
+          </p>
         </section>
       )}
 
       {panel.kind === "unselected" && (
         <section className="mt-5">
           <h2 className="text-xl font-semibold leading-7">今天想探索哪間店？</h2>
-          <p className="mt-2 text-sm leading-6 text-lumora-secondary">
+          <p className="mt-2 text-sm leading-6 text-lumora-muted">
             在 Google Maps 搜尋感興趣的商家，並開啟它的商家頁面。選好後，就能在這裡開始分析。
           </p>
         </section>
       )}
 
       {!result && panel.kind !== "unsupported" && panel.kind !== "unselected" && (
-        <section className={isLoading || panel.kind === "checking"
-          ? "mt-4 rounded-xl border border-lumora-border bg-white p-4"
-          : "mt-5"}>
-          <h2 className={isLoading || panel.kind === "checking" ? "font-semibold" : "text-xl font-semibold leading-7"}>
-            {failure ? "這次分析還沒完成" : panel.kind === "merchant" && !task && !starting
+        <section className="mt-6 min-[600px]:mt-9">
+          <h2 className="break-words text-xl font-medium leading-7 min-[600px]:text-[1.375rem]">
+            {isLoading && task?.verifiedTitle ? task.verifiedTitle : failure ? "這次分析還沒完成" : panel.kind === "merchant" && !task && !starting
               ? "看懂評論，再做決定。" : "分析商家評論"}
           </h2>
 
           {panel.kind === "merchant" && !task && !starting && !failure && (
-            <p className="mt-2 text-sm leading-6 text-lumora-secondary">
+            <p className="mt-2 text-sm leading-6 text-lumora-muted">
               Lumora 會擷取最多 {REVIEW_COLLECTION_LIMIT} 則評論，由 AI 整理評論重點、推薦餐點與到訪前可參考的資訊。
             </p>
           )}
 
-          {(task || starting) && (
+          {(task || starting) && !(isLoading && task?.verifiedTitle) && (
             <p className="mt-2 break-words text-sm font-semibold leading-6">
               分析對象：{task?.verifiedTitle ?? (isLoading ? "正在確認商家名稱" : "商家名稱未記錄")}
             </p>
           )}
 
-          <p role="status" aria-atomic="true" className={status ? `mt-2 flex items-center gap-2 text-sm leading-6 ${
-            isLoading ? "text-lumora-action" : result ? "text-emerald-700" : "text-lumora-secondary"
-          }` : "sr-only"}>
-            {isLoading && (
-              <span aria-hidden="true" className="h-4 w-4 shrink-0 rounded-full border-2 border-lumora-lavender border-t-lumora-action motion-safe:animate-spin" />
-            )}
+          <p role="status" aria-atomic="true" className={status ? "mt-2 break-words text-sm leading-6 text-lumora-muted" : "sr-only"}>
             <span>
-              {status}
+              {task?.phase === "collecting" && !starting && !failure ? "正在整理商家評論" : status}
               {status && !starting && task?.newest === false && "，採用目前評論順序。"}
             </span>
           </p>
@@ -672,35 +636,35 @@ export default function App() {
           <AnalysisProgress task={task} starting={starting} />
 
           {failure && (
-            <p role="alert" className="mt-3 break-words rounded-lg bg-red-50 px-3 py-2.5 text-sm leading-6 text-red-800">
+            <p role="alert" className="mt-3 break-words border-t border-lumora-border pt-3 text-sm leading-6 text-lumora-error">
               {failure.message}
             </p>
           )}
 
-          {((panel.kind === "merchant" && !failure) || failure?.retry) && (
+          {!isLoading && ((panel.kind === "merchant" && !failure) || failure?.retry) && (
             <button
-              className="mt-3 w-full rounded-lg bg-lumora-action px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-lumora-action/90 disabled:cursor-not-allowed disabled:bg-lumora-action/10 disabled:text-lumora-action"
-              disabled={isLoading}
+              className="lumora-primary mt-4 w-full"
               onClick={() => failure?.retry === "context" ? actions.current?.check() : void actions.current?.analyze()}
               type="button"
             >
-              {failure?.retry === "context" ? "確認商家" : failure || result ? "重新分析" : isLoading ? "AI 消費分析" : "開始消費分析"}
+              {failure?.retry === "context" ? "確認商家" : failure || result ? "重新分析" : "開始消費分析"}
             </button>
           )}
         </section>
       )}
 
       {result && (
-        <div className="mt-3 space-y-5">
+        <div className="mt-5 space-y-6 min-[600px]:mt-6">
           <section aria-label="分析對象">
-            <h2 className="break-words text-xl font-semibold leading-7">{task?.verifiedTitle ?? "商家名稱未記錄"}</h2>
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2">
-              <p role="status" className="text-xs leading-5 text-lumora-secondary">
-                <span className="font-medium text-emerald-700">分析完成</span>
-                {Number.isFinite(result.analyzed_count) && <span> · 已分析 {result.analyzed_count} 則評論</span>}
+            <p className="mb-2.5 text-xs text-lumora-iris">消費指南 / 評論洞察</p>
+            <h2 className="break-words text-2xl font-semibold leading-8 min-[600px]:text-[1.5625rem]">{task?.verifiedTitle ?? "商家名稱未記錄"}</h2>
+            <div className="-my-1 flex flex-wrap items-center justify-between gap-x-3">
+              <p role="status" className="text-xs leading-5 tabular-nums text-lumora-muted">
+                <span className={Number.isFinite(result.analyzed_count) ? "sr-only" : undefined}>分析完成。 </span>
+                {Number.isFinite(result.analyzed_count) && <span>根據 {result.analyzed_count} 則評論整理</span>}
               </p>
               <button
-                className="min-h-8 shrink-0 rounded-sm px-1 text-xs font-medium text-lumora-action underline-offset-4 hover:underline"
+                className="min-h-8 shrink-0 rounded-sm text-xs text-lumora-iris underline-offset-4 hover:underline active:text-lumora-ink"
                 onClick={() => void actions.current?.analyze()}
                 type="button"
               >
@@ -708,7 +672,7 @@ export default function App() {
               </button>
             </div>
             {result.analysis_mode === "mock" && (
-              <p className="inline-block rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-800">
+              <p className="mt-1 text-xs font-medium leading-5 text-lumora-ochre">
                 <span lang="en">MOCK MODE</span> · 模擬結果
               </p>
             )}
@@ -730,7 +694,7 @@ export default function App() {
 
           <footer className="border-t border-lumora-border pt-4">
             <h2 className="text-sm font-semibold">分析資訊</h2>
-            <dl className="mt-2 space-y-1 text-xs leading-5 text-lumora-secondary">
+            <dl className="mt-2 space-y-1 text-xs leading-5 text-lumora-muted">
               <div className="flex gap-2">
                 <dt className="shrink-0">分析模式</dt>
                 <dd>{result.analysis_mode === "mock" ? "MOCK MODE（模擬分析）" : result.analysis_mode === "gemini" ? "GEMINI MODE" : "未記錄"}</dd>
@@ -745,6 +709,12 @@ export default function App() {
                 <dt className="shrink-0">資料範圍</dt>
                 <dd>本次納入分析的文字評論。{task?.newest === false && "採用目前評論順序。"}</dd>
               </div>
+              {!!result.practical_visit_information?.length && (
+                <div className="flex gap-2">
+                  <dt className="shrink-0">到訪資訊</dt>
+                  <dd>資訊整理自評論，實際價格與店家政策可能有所變動。</dd>
+                </div>
+              )}
             </dl>
           </footer>
         </div>
