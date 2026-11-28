@@ -241,18 +241,27 @@ Use the test script declared in `extension/package.json` to run the extension re
 └── README.md
 ```
 
-## Privacy and known limitations
+## Privacy and limitations
 
-- Google Maps DOM changes may affect review collection. Live Chrome end-to-end behavior, slow service-worker requests, and specific session cleanup races still require verification.
-- Evidence ID and excerpt validation do not establish that every model-generated claim is semantically supported. Visit information may be outdated, and the current UI does not expose original review evidence for every analysis section.
-- The seven-day cache TTL is an eligibility period, not a guarantee of immediate physical deletion. Expired entries are removed through cleanup triggered by cache operations or startup.
-- Gemini `store: false` disables interaction storage; it does not establish zero data retention or exclude other provider processing.
-- Production proxy configuration, disk persistence, provider account settings, dependency scanning, and public API abuse protection require deployment-specific verification.
+- Review collection is initiated by the user.
 
-## Project and release status
+- Nonessential reviewer metadata is not separately collected.
 
-Lumora is developed for learning and portfolio demonstration. A local Mock-mode API demonstration with synthetic reviews has been verified in the final engineering review. Public release remains blocked pending an appropriate authorization basis for Google Maps content collection, transfer, storage and redisplay, production environment verification, and final privacy and store disclosures.
+- Generated insights may contain inaccuracies.
 
+- Free hosting may introduce cold-start delays and non-persistent caching.
+
+- Single-flight coordination and concurrency limits are process-local.
+
+- Cache TTL and store: false do not guarantee immediate deletion or zero data retention.
+
+- Production AI availability remains subject to service configuration, provider terms, and Google Maps data-use authorization.
+
+Chrome Web Store approval does not constitute authorization to process Google Maps content.
+
+## Links
+
+- [Chrome Web Store](https://chromewebstore.google.com/detail/lumora-for-google-maps/alcgbbggeoheolgjgllkblippjidemnk)
 - [Data usage specification](docs/GOOGLE_MAPS_DATA_USAGE_SPEC.md)
-- [Privacy policy draft](docs/PRIVACY_POLICY_DRAFT.md)
-- [Compliance review and release requirements](docs/GOOGLE_MAPS_COMPLIANCE_REVIEW.md)
+- [Privacy policy](docs/PRIVACY_POLICY_DRAFT.md)
+- [Compliance review](docs/GOOGLE_MAPS_COMPLIANCE_REVIEW.md)
