@@ -2,6 +2,8 @@
 
 ![Lumora — A brighter way to choose](docs/assets/lumora-hero.png)
 
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-Install%20Lumora-6941A5?logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/lumora-for-google-maps/alcgbbggeoheolgjgllkblippjidemnk)
+
 
 An AI-powered consumer decision assistant for Google Maps, built as a Chrome Manifest V3 extension with a FastAPI backend.
 
